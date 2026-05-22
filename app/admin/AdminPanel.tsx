@@ -1,6 +1,49 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import {
+  DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent
+} from '@dnd-kit/core'
+import {
+  arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+
+function SortableModel({ model, idx, total, onEdit, onDelete }: any) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: model.id })
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }
+
+  return (
+    <div ref={setNodeRef} style={style} className="flex items-center justify-between p-3 border border-slate-100 rounded-xl hover:bg-slate-50 bg-white">
+      <div className="flex items-center gap-3">
+        <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing p-2 text-slate-300 hover:text-slate-500 touch-none">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="5" cy="4" r="1.5"/><circle cx="11" cy="4" r="1.5"/>
+            <circle cx="5" cy="8" r="1.5"/><circle cx="11" cy="8" r="1.5"/>
+            <circle cx="5" cy="12" r="1.5"/><circle cx="11" cy="12" r="1.5"/>
+          </svg>
+        </div>
+        <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-xs font-bold text-slate-500">{idx + 1}</div>
+        {model.img_url
+          ? <img src={model.img_url} className="w-16 h-10 object-contain rounded-lg bg-slate-50 border border-slate-100" />
+          : <div className="w-16 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-xs text-slate-400">Sin img</div>
+        }
+        <div>
+          <div className="text-xs font-bold text-blue-600 uppercase">{model.brand}</div>
+          <div className="font-bold text-sm">{model.name} {model.version && <span className="text-slate-400 font-normal">{model.version}</span>}</div>
+          <div className="text-xs text-slate-400">{model.price}</div>
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className={`text-xs font-bold px-2 py-1 rounded-full ${model.is_active ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+          {model.is_active ? 'Visible' : 'Oculto'}
+        </span>
+        <a href={`/admin/nuevo-vehiculo?id=${model.id}`} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏ Editar</a>
+        <button onClick={() => onDelete(model.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button>
+      </div>
+    </div>
+  )
+}
 
 export default function AdminPanel() {
   const [tab, setTab] = useState('models')
@@ -14,6 +57,11 @@ export default function AdminPanel() {
   const [editCatId, setEditCatId] = useState<string|null>(null)
   const [featForm, setFeatForm] = useState({ name:'', category_id:'', type:'boolean', sort_order:0 })
   const [editFeatId, setEditFeatId] = useState<string|null>(null)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
 
   useEffect(() => { loadAll() }, [])
 
@@ -30,27 +78,23 @@ export default function AdminPanel() {
 
   function toast(t: string) { setMsg(t); setTimeout(() => setMsg(''), 3000) }
 
+  async function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIdx = models.findIndex(m => m.id === active.id)
+    const newIdx = models.findIndex(m => m.id === over.id)
+    const newModels = arrayMove(models, oldIdx, newIdx)
+    setModels(newModels)
+    await Promise.all(
+      newModels.map((m, i) => supabase.from('models').update({ sort_order: i }).eq('id', m.id))
+    )
+    toast('Orden guardado ✓')
+  }
+
   async function deleteModel(id: string) {
     if (!confirm('¿Eliminar este modelo?')) return
     await supabase.from('models').delete().eq('id', id)
     toast('Eliminado ✓'); await loadAll()
-  }
-
-  async function moveModel(id: string, dir: 'up' | 'down') {
-    const idx = models.findIndex(m => m.id === id)
-    const swapIdx = dir === 'up' ? idx - 1 : idx + 1
-    if (swapIdx < 0 || swapIdx >= models.length) return
-    const a = models[idx]
-    const b = models[swapIdx]
-    const newOrder = [...models]
-    newOrder[idx] = { ...a, sort_order: b.sort_order }
-    newOrder[swapIdx] = { ...b, sort_order: a.sort_order }
-    await Promise.all([
-      supabase.from('models').update({ sort_order: b.sort_order }).eq('id', a.id),
-      supabase.from('models').update({ sort_order: a.sort_order }).eq('id', b.id),
-    ])
-    setModels(newOrder.sort((x, y) => x.sort_order - y.sort_order))
-    toast('Orden actualizado ✓')
   }
 
   async function saveCat() {
@@ -133,48 +177,24 @@ export default function AdminPanel() {
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-black text-lg">Vehículos ({models.length})</h2>
-              <p className="text-xs text-slate-400">Usa las flechas para cambiar el orden en el comparador</p>
+              <p className="text-xs text-slate-400">Arrastra ⠿ para cambiar el orden</p>
             </div>
-            <div className="space-y-2">
-              {models.map((m, idx) => (
-                <div key={m.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-xl hover:bg-slate-50">
-                  <div className="flex items-center gap-3">
-                    <div className="flex flex-col gap-1">
-                      <button onClick={() => moveModel(m.id, 'up')} disabled={idx === 0}
-                        className="w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs leading-none">▲</button>
-                      <button onClick={() => moveModel(m.id, 'down')} disabled={idx === models.length - 1}
-                        className="w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs leading-none">▼</button>
-                    </div>
-                    <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-xs font-bold text-slate-500">{idx + 1}</div>
-                    {m.img_url
-                      ? <img src={m.img_url} className="w-16 h-10 object-contain rounded-lg bg-slate-50 border border-slate-100" />
-                      : <div className="w-16 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-xs text-slate-400">Sin img</div>
-                    }
-                    <div>
-                      <div className="text-xs font-bold text-blue-600 uppercase">{m.brand}</div>
-                      <div className="font-bold text-sm">{m.name} {m.version && <span className="text-slate-400 font-normal">{m.version}</span>}</div>
-                      <div className="text-xs text-slate-400">{m.price}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`text-xs font-bold px-2 py-1 rounded-full ${m.is_active ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-                      {m.is_active ? 'Visible' : 'Oculto'}
-                    </span>
-                    <a href={`/admin/nuevo-vehiculo?id=${m.id}`}
-                      className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏ Editar</a>
-                    <button onClick={() => deleteModel(m.id)}
-                      className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button>
-                  </div>
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={models.map(m => m.id)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-2">
+                  {models.map((m, idx) => (
+                    <SortableModel key={m.id} model={m} idx={idx} total={models.length} onDelete={deleteModel} />
+                  ))}
                 </div>
-              ))}
-              {models.length === 0 && (
-                <div className="text-center py-12 text-slate-400">
-                  <div className="text-4xl mb-3">🚗</div>
-                  <div className="font-bold mb-1">Sin vehículos todavía</div>
-                  <div className="text-sm">Usa <strong>+ Nuevo vehículo</strong> o <strong>Importar Excel</strong></div>
-                </div>
-              )}
-            </div>
+              </SortableContext>
+            </DndContext>
+            {models.length === 0 && (
+              <div className="text-center py-12 text-slate-400">
+                <div className="text-4xl mb-3">🚗</div>
+                <div className="font-bold mb-1">Sin vehículos todavía</div>
+                <div className="text-sm">Usa <strong>+ Nuevo vehículo</strong> o <strong>Importar Excel</strong></div>
+              </div>
+            )}
           </div>
         )}
 
