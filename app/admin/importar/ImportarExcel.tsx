@@ -8,10 +8,10 @@ export default function ImportarExcel() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
-  const [preview, setPreview] = useState<any[]>([])
-  const [rows, setRows] = useState<any[]>([])
+  const [preview, setPreview] = useState<string[]>([])
+  const [parsed, setParsed] = useState<any>(null)
 
-  function toast(t: string) { setMsg(t); setTimeout(() => setMsg(''), 4000) }
+  function toast(t: string) { setMsg(t); setTimeout(() => setMsg(''), 5000) }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -21,59 +21,101 @@ export default function ImportarExcel() {
       const data = new Uint8Array(ev.target?.result as ArrayBuffer)
       const wb = XLSX.read(data, { type: 'array' })
       const ws = wb.Sheets[wb.SheetNames[0]]
-      const json = XLSX.utils.sheet_to_json(ws, { defval: '' })
-      setRows(json)
-      setPreview((json as any[]).slice(0, 3))
+      const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+
+      // Row 0 = headers: Category, Feature, then vehicle names
+      // Row 1 = subheaders: blank, blank, then version names
+      // Row 2+ = data rows
+
+      const headerRow = rows[0] as string[]
+      const versionRow = rows[1] as string[]
+
+      // Build vehicle list from header row (cols 2+)
+      const vehicles: { brand: string, name: string, version: string, colIndex: number }[] = []
+      let currentBrand = ''
+      for (let c = 2; c < headerRow.length; c++) {
+        if (headerRow[c] && String(headerRow[c]).trim() !== '') {
+          currentBrand = String(headerRow[c]).trim()
+        }
+        const version = versionRow[c] ? String(versionRow[c]).trim() : ''
+        // Parse brand and model from header like "LINKTOUR ALUMI" or "LIUX BIG"
+        const parts = currentBrand.split(' ')
+        const brand = parts[0] || currentBrand
+        const name = parts.slice(1).join(' ') || currentBrand
+        vehicles.push({ brand, name, version, colIndex: c })
+      }
+
+      // Build feature rows (row 2+)
+      const featureRows: { category: string, feature: string, values: Record<number, string> }[] = []
+      let currentCat = ''
+      for (let r = 2; r < rows.length; r++) {
+        const row = rows[r]
+        if (!row || row.every((c: any) => !c)) continue
+        if (row[0] && String(row[0]).trim()) currentCat = String(row[0]).trim()
+        const feat = String(row[1] || '').trim()
+        if (!feat) continue
+        const values: Record<number, string> = {}
+        for (const v of vehicles) {
+          values[v.colIndex] = String(row[v.colIndex] || '').trim()
+        }
+        featureRows.push({ category: currentCat, feature: feat, values })
+      }
+
+      setParsed({ vehicles, featureRows })
+      setPreview(vehicles.map(v => `${v.brand} ${v.name} ${v.version}`.trim()))
     }
     reader.readAsArrayBuffer(file)
   }
 
   async function doImport() {
-    if (!rows.length) { toast('No hay datos para importar'); return }
+    if (!parsed) { toast('No hay datos para importar'); return }
     setLoading(true)
 
-    const { data: categories } = await supabase.from('categories').select('*')
-    const { data: features } = await supabase.from('features').select('*')
+    const { vehicles, featureRows } = parsed
+
+    // Load categories and features from DB
+    const { data: dbCats } = await supabase.from('categories').select('*')
+    const { data: dbFeats } = await supabase.from('features').select('*')
 
     let imported = 0
     let errors = 0
 
-    for (const row of rows as any[]) {
+    for (const v of vehicles) {
       try {
-        const modelData = {
-          brand: row['Brand'] || row['Marca'] || '',
-          name: row['Model'] || row['Modelo'] || '',
-          version: row['Version'] || row['Versión'] || '',
-          price: row['Price'] || row['Precio'] || '',
-          img_url: row['Image'] || row['Imagen'] || '',
+        // Create model
+        const { data: saved } = await supabase.from('models').insert({
+          brand: v.brand,
+          name: v.name,
+          version: v.version,
           is_active: true,
           sort_order: 0,
-        }
-        if (!modelData.brand || !modelData.name) { errors++; continue }
-
-        const { data: saved } = await supabase
-          .from('models').insert(modelData).select().single()
+        }).select().single()
 
         if (!saved) { errors++; continue }
 
-        const valueUpserts: any[] = []
-        for (const feat of (features || [])) {
-          const cat = (categories || []).find(c => c.id === feat.category_id)
-          const colName = feat.name
-          const colWithCat = `${cat?.name} - ${feat.name}`
-          const val = row[colName] || row[colWithCat] || ''
+        // Match feature values
+        const upserts: any[] = []
+        for (const fr of featureRows) {
+          const dbFeat = dbFeats?.find(f => {
+            const dbCat = dbCats?.find(c => c.id === f.category_id)
+            return f.name.toLowerCase().trim() === fr.feature.toLowerCase().trim() &&
+              dbCat?.name.toLowerCase().trim() === fr.category.toLowerCase().trim()
+          })
+          if (!dbFeat) continue
+          const val = fr.values[v.colIndex]
           if (val !== '') {
-            valueUpserts.push({ feature_id: feat.id, model_id: saved.id, value: String(val) })
+            upserts.push({ feature_id: dbFeat.id, model_id: saved.id, value: val })
           }
         }
-        if (valueUpserts.length > 0) {
-          await supabase.from('feature_values').upsert(valueUpserts, { onConflict: 'feature_id,model_id' })
+
+        if (upserts.length > 0) {
+          await supabase.from('feature_values').upsert(upserts, { onConflict: 'feature_id,model_id' })
         }
         imported++
       } catch { errors++ }
     }
 
-    toast(`Importados: ${imported} vehículos${errors > 0 ? ` · Errores: ${errors}` : ''}`)
+    toast(`Importados: ${imported} vehículos${errors > 0 ? ` · Errores: ${errors}` : ' ✓'}`)
     setLoading(false)
     if (imported > 0) setTimeout(() => router.push('/admin'), 2000)
   }
@@ -93,62 +135,43 @@ export default function ImportarExcel() {
       <div className="max-w-3xl mx-auto p-6 space-y-6">
 
         <div className="bg-white rounded-2xl p-6 shadow-sm">
-          <h2 className="font-black text-base mb-2 text-slate-700 uppercase tracking-wider">Formato del Excel</h2>
-          <p className="text-sm text-slate-500 mb-4">El archivo Excel debe tener estas columnas en la primera fila:</p>
+          <h2 className="font-black text-base mb-2 text-slate-700 uppercase tracking-wider">Formato esperado</h2>
+          <p className="text-sm text-slate-500 mb-3">El archivo debe tener este formato — el mismo que tu Excel actual:</p>
           <div className="bg-slate-50 rounded-xl p-4 text-xs font-mono text-slate-600 space-y-1">
-            <div><span className="font-bold text-blue-600">Brand</span> · <span className="font-bold text-blue-600">Model</span> · <span className="font-bold text-blue-600">Version</span> · <span className="font-bold text-blue-600">Price</span> · <span className="font-bold text-blue-600">Image</span></div>
-            <div className="text-slate-400 mt-2">Luego una columna por cada característica con el mismo nombre exacto:</div>
-            <div>Driving Mileage under WMTC mode (km) · Battery capacity (kWh) · Maximum speed (km/h) · ...</div>
+            <div>Fila 1: <span className="text-blue-600">Category · Feature · MARCA MODELO · MARCA MODELO · ...</span></div>
+            <div>Fila 2: <span className="text-blue-600">— · — · Versión · Versión · ...</span></div>
+            <div>Fila 3+: <span className="text-slate-400">datos de cada característica por vehículo</span></div>
           </div>
-          <a href="#" onClick={downloadTemplate} className="inline-block mt-4 text-sm text-blue-600 font-bold hover:underline">⬇ Descargar plantilla Excel</a>
         </div>
 
         <div className="bg-white rounded-2xl p-6 shadow-sm">
           <h2 className="font-black text-base mb-4 text-slate-700 uppercase tracking-wider">Subir archivo</h2>
-          <input type="file" accept=".xlsx,.xls" onChange={handleFile}
-            className="w-full border-2 border-dashed border-slate-200 rounded-xl p-8 text-sm text-slate-500 cursor-pointer hover:border-blue-300 hover:bg-blue-50 transition" />
+          <label className="block w-full border-2 border-dashed border-slate-200 rounded-xl p-10 text-center cursor-pointer hover:border-blue-300 hover:bg-blue-50 transition">
+            <div className="text-3xl mb-2">📊</div>
+            <div className="text-sm font-bold text-slate-600">Haz clic para seleccionar el Excel</div>
+            <div className="text-xs text-slate-400 mt-1">.xlsx o .xls</div>
+            <input type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" />
+          </label>
         </div>
 
         {preview.length > 0 && (
           <div className="bg-white rounded-2xl p-6 shadow-sm">
-            <h2 className="font-black text-base mb-4 text-slate-700 uppercase tracking-wider">Vista previa ({rows.length} filas)</h2>
-            <div className="overflow-x-auto">
-              <table className="text-xs w-full">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    {Object.keys(preview[0]).slice(0,6).map(k => (
-                      <th key={k} className="text-left p-2 font-bold text-slate-500 uppercase">{k}</th>
-                    ))}
-                    {Object.keys(preview[0]).length > 6 && <th className="text-left p-2 text-slate-400">+{Object.keys(preview[0]).length - 6} más</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.map((r, i) => (
-                    <tr key={i} className="border-b border-slate-50">
-                      {Object.values(r).slice(0,6).map((v: any, j) => (
-                        <td key={j} className="p-2 text-slate-600">{String(v).slice(0,30)}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <h2 className="font-black text-base mb-4 text-slate-700 uppercase tracking-wider">Vehículos detectados ({preview.length})</h2>
+            <div className="space-y-2 mb-6">
+              {preview.map((v, i) => (
+                <div key={i} className="flex items-center gap-3 p-3 border border-slate-100 rounded-xl">
+                  <div className="w-6 h-6 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center text-xs font-bold">{i+1}</div>
+                  <div className="text-sm font-medium">{v}</div>
+                </div>
+              ))}
             </div>
             <button onClick={doImport} disabled={loading}
-              className="mt-4 w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-50 text-sm">
-              {loading ? 'Importando...' : `✓ Importar ${rows.length} vehículos`}
+              className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-50 text-sm">
+              {loading ? 'Importando...' : `✓ Importar ${preview.length} vehículos`}
             </button>
           </div>
         )}
       </div>
     </div>
   )
-
-  async function downloadTemplate() {
-    const { data: features } = await supabase.from('features').select('*')
-    const headers = ['Brand','Model','Version','Price','Image', ...(features||[]).map(f => f.name)]
-    const ws = XLSX.utils.aoa_to_sheet([headers, headers.map(() => '')])
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Vehículos')
-    XLSX.writeFile(wb, 'plantilla_liux.xlsx')
-  }
 }
