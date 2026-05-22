@@ -76,7 +76,7 @@ export default function ComparadorClient({ models, categories, features, values 
       <header className="bg-[#071225] text-white px-4 md:px-8 flex items-center justify-between sticky top-0 z-20 shadow-lg h-14">
         <div>
           <div className="font-black text-lg tracking-widest leading-none">LIUX</div>
-          <div className="text-[8px] tracking-[.3em] text-slate-400 leading-none mt-0.5">LINKTOUR</div>
+          <div className="text-[8px] tracking-[.3em] text-slate-400 leading-none mt-0.5">COMPARADOR</div>
         </div>
         {/* Desktop nav */}
         <nav className="hidden md:flex gap-1">
