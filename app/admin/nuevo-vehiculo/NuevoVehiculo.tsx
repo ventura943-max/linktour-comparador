@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { supabase, uploadImage } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 export default function NuevoVehiculo() {
@@ -9,15 +9,15 @@ export default function NuevoVehiculo() {
   const modelId = params.get('id')
 
   const [loading, setLoading] = useState(false)
-  const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState('')
   const [categories, setCategories] = useState<any[]>([])
   const [features, setFeatures] = useState<any[]>([])
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string>('')
 
   const [model, setModel] = useState({
     brand:'', name:'', version:'', price:'',
-    range_wmtc:'', max_speed:'', battery:'', power:'',
-    torque:'', charge_time:'', img_url:'', is_active:true, sort_order:0
+    img_url:'', is_active:true, sort_order:0
   })
   const [values, setValues] = useState<Record<string,string>>({})
 
@@ -33,7 +33,10 @@ export default function NuevoVehiculo() {
 
     if (modelId) {
       const { data: m } = await supabase.from('models').select('*').eq('id', modelId).single()
-      if (m) setModel(m)
+      if (m) {
+        setModel(m)
+        if (m.img_url) setImagePreview(m.img_url)
+      }
       const { data: vals } = await supabase.from('feature_values').select('*').eq('model_id', modelId)
       if (vals) {
         const map: Record<string,string> = {}
@@ -45,32 +48,42 @@ export default function NuevoVehiculo() {
 
   function toast(t: string) { setMsg(t); setTimeout(() => setMsg(''), 3000) }
 
-  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!modelId && !model.name) { toast('Guarda el vehículo primero antes de subir imagen'); return }
-    setUploading(true)
-    const tempId = modelId || `temp_${Date.now()}`
-    const url = await uploadImage(file, tempId)
-    if (url) {
-      setModel({...model, img_url: url})
-      toast('Imagen subida ✓')
-    } else {
-      toast('Error al subir imagen')
-    }
-    setUploading(false)
+    setImageFile(file)
+    setImagePreview(URL.createObjectURL(file))
   }
 
   async function save() {
     if (!model.brand || !model.name) { toast('Marca y modelo son obligatorios'); return }
     setLoading(true)
+
+    let imgUrl = model.img_url
+
+    // Upload image if selected
+    if (imageFile) {
+      const ext = imageFile.name.split('.').pop()
+      const path = `${model.brand}_${model.name}_${model.version || 'default'}.${ext}`.replace(/\s/g, '_')
+      const { error } = await supabase.storage.from('vehicles').upload(path, imageFile, { upsert: true })
+      if (!error) {
+        const { data } = supabase.storage.from('vehicles').getPublicUrl(path)
+        imgUrl = data.publicUrl
+      } else {
+        toast('Error al subir imagen: ' + error.message)
+      }
+    }
+
+    const modelData = { ...model, img_url: imgUrl }
     let mid = modelId
+
     if (modelId) {
-      await supabase.from('models').update(model).eq('id', modelId)
+      await supabase.from('models').update(modelData).eq('id', modelId)
     } else {
-      const { data } = await supabase.from('models').insert(model).select().single()
+      const { data } = await supabase.from('models').insert(modelData).select().single()
       mid = data?.id
     }
+
     if (mid) {
       const upserts = Object.entries(values)
         .filter(([, v]) => v !== '')
@@ -79,6 +92,7 @@ export default function NuevoVehiculo() {
         await supabase.from('feature_values').upsert(upserts, { onConflict: 'feature_id,model_id' })
       }
     }
+
     toast('Guardado ✓')
     setLoading(false)
     setTimeout(() => router.push('/admin'), 1200)
@@ -113,36 +127,32 @@ export default function NuevoVehiculo() {
             <div><label className={lc}>Modelo</label><input className={ic} value={model.name} onChange={e => setModel({...model, name:e.target.value})} placeholder="ej. BIG" /></div>
             <div><label className={lc}>Versión</label><input className={ic} value={model.version} onChange={e => setModel({...model, version:e.target.value})} placeholder="ej. 15" /></div>
           </div>
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div><label className={lc}>Precio</label><input className={ic} value={model.price} onChange={e => setModel({...model, price:e.target.value})} placeholder="ej. 16.450 €" /></div>
+          <div className="mb-4">
+            <label className={lc}>Precio</label>
+            <input className={ic} value={model.price} onChange={e => setModel({...model, price:e.target.value})} placeholder="ej. 16.450 €" />
           </div>
 
-          {/* IMAGE UPLOAD */}
           <div className="mb-4">
             <label className={lc}>Imagen del vehículo</label>
             <div className="flex items-center gap-4">
-              <div className="w-32 h-24 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center overflow-hidden">
-                {model.img_url
-                  ? <img src={model.img_url} alt="preview" className="max-w-full max-h-full object-contain" />
+              <div className="w-36 h-24 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center overflow-hidden shrink-0">
+                {imagePreview
+                  ? <img src={imagePreview} alt="preview" className="max-w-full max-h-full object-contain" />
                   : <span className="text-xs text-slate-400">Sin imagen</span>
                 }
               </div>
-              <div className="flex-1">
-                <label className="block w-full cursor-pointer">
-                  <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-blue-300 hover:bg-blue-50 transition">
-                    <div className="text-sm font-bold text-slate-600">
-                      {uploading ? 'Subiendo...' : '📁 Seleccionar imagen'}
-                    </div>
-                    <div className="text-xs text-slate-400 mt-1">JPG, PNG, WebP</div>
-                  </div>
-                  <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" disabled={uploading} />
-                </label>
-                {model.img_url && (
-                  <button onClick={() => setModel({...model, img_url:''})}
-                    className="mt-2 text-xs text-red-500 hover:text-red-700">✕ Eliminar imagen</button>
-                )}
-              </div>
+              <label className="flex-1 cursor-pointer">
+                <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-blue-300 hover:bg-blue-50 transition">
+                  <div className="text-sm font-bold text-slate-600">📁 {imageFile ? imageFile.name : 'Seleccionar imagen'}</div>
+                  <div className="text-xs text-slate-400 mt-1">La imagen se sube al guardar · JPG, PNG, WebP</div>
+                </div>
+                <input type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+              </label>
             </div>
+            {imagePreview && (
+              <button onClick={() => { setImageFile(null); setImagePreview(''); setModel({...model, img_url:''}) }}
+                className="mt-2 text-xs text-red-500 hover:text-red-700">✕ Eliminar imagen</button>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
