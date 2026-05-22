@@ -1,20 +1,34 @@
 'use client'
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 export default function ComparadorClient({ models, categories, features, values }: any) {
   const [activeCat, setActiveCat] = useState('all')
   const [search, setSearch] = useState('')
-  const [selectedIds, setSelectedIds] = useState<string[]>(models.map((m: any) => m.id))
+  const [selectedIds, setSelectedIds] = useState<string[]>(models.slice(0, 3).map((m: any) => m.id))
+  const [showPicker, setShowPicker] = useState(false)
+  const pickerRef = useRef<HTMLDivElement>(null)
 
   const selectedModels = models.filter((m: any) => selectedIds.includes(m.id))
+  const availableModels = models.filter((m: any) => !selectedIds.includes(m.id))
 
-  function toggleModel(id: string) {
-    if (selectedIds.includes(id)) {
-      if (selectedIds.length <= 1) return // keep at least 1
-      setSelectedIds(selectedIds.filter(x => x !== id))
-    } else {
-      setSelectedIds([...selectedIds, id])
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowPicker(false)
+      }
     }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  function addModel(id: string) {
+    setSelectedIds([...selectedIds, id])
+    setShowPicker(false)
+  }
+
+  function removeModel(id: string) {
+    if (selectedIds.length <= 1) return
+    setSelectedIds(selectedIds.filter(x => x !== id))
   }
 
   function val(featId: string, modelId: string) {
@@ -70,33 +84,18 @@ export default function ComparadorClient({ models, categories, features, values 
         </nav>
       </header>
 
-      {/* MODEL SELECTOR */}
-      <section id="comparador" className="px-6 pt-6 pb-2">
-        <h1 className="text-3xl font-black tracking-tight text-center mb-1">Comparador de Modelos</h1>
-        <p className="text-slate-500 text-sm text-center mb-5">Selecciona los modelos que quieres comparar</p>
-        <div className="flex gap-3 flex-wrap justify-center mb-2">
-          {models.map((m: any) => {
-            const active = selectedIds.includes(m.id)
-            return (
-              <button key={m.id} onClick={() => toggleModel(m.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold border-2 transition ${active ? 'border-[#081224] bg-[#081224] text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-400'}`}>
-                {m.img_url && <img src={m.img_url} className="w-6 h-4 object-contain" />}
-                <span className="text-xs opacity-70">{m.brand}</span>
-                <span>{m.version || m.name}</span>
-                {active ? <span className="text-xs">✓</span> : <span className="text-xs opacity-40">+</span>}
-              </button>
-            )
-          })}
-        </div>
-        <p className="text-center text-xs text-slate-400 mb-4">{selectedIds.length} de {models.length} modelos seleccionados</p>
-      </section>
-
       {/* CARDS */}
-      <section id="modelos" className="px-6 pb-6">
+      <section id="comparador" className="px-6 pt-8 pb-6">
+        <h1 className="text-3xl font-black tracking-tight text-center mb-1">Comparador de Modelos</h1>
+        <p className="text-slate-500 text-sm text-center mb-8">Comparativa técnica y comercial</p>
+
         <div className="overflow-x-auto pb-2">
-          <div className="flex gap-4" style={{ minWidth: 'max-content' }}>
+          <div className="flex gap-4 items-stretch" style={{ minWidth: 'max-content' }}>
+
             {selectedModels.map((m: any) => (
-              <div key={m.id} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-md w-44 shrink-0">
+              <div key={m.id} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-md w-44 shrink-0 relative group">
+                <button onClick={() => removeModel(m.id)}
+                  className="absolute top-2 right-2 w-6 h-6 rounded-full bg-slate-100 text-slate-400 hover:bg-red-100 hover:text-red-500 text-xs font-bold opacity-0 group-hover:opacity-100 transition flex items-center justify-center">✕</button>
                 <div className="text-[9px] font-black tracking-widest text-blue-600 uppercase mb-0">{m.brand} {m.name}</div>
                 <div className="font-black text-lg tracking-tight mb-2">{m.version || m.name}</div>
                 <div className="h-24 flex items-center justify-center overflow-hidden mb-2 bg-slate-50 rounded-xl">
@@ -113,6 +112,42 @@ export default function ComparadorClient({ models, categories, features, values 
                 ))}
               </div>
             ))}
+
+            {/* ADD MODEL BUTTON */}
+            {availableModels.length > 0 && (
+              <div className="relative shrink-0" ref={pickerRef}>
+                <button onClick={() => setShowPicker(!showPicker)}
+                  className="w-44 h-full min-h-[280px] border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition cursor-pointer bg-white">
+                  <div className="w-10 h-10 rounded-full border-2 border-current flex items-center justify-center text-2xl font-light">+</div>
+                  <div className="text-xs font-bold">Añadir modelo</div>
+                </button>
+
+                {showPicker && (
+                  <div className="absolute top-0 left-0 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 z-20 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-slate-100">
+                      <div className="text-xs font-black text-slate-500 uppercase tracking-wider">Selecciona un modelo</div>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto">
+                      {availableModels.map((m: any) => (
+                        <button key={m.id} onClick={() => addModel(m.id)}
+                          className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition text-left border-b border-slate-50">
+                          <div className="w-12 h-8 bg-slate-50 rounded-lg overflow-hidden shrink-0 flex items-center justify-center">
+                            {m.img_url
+                              ? <img src={m.img_url} className="max-w-full max-h-full object-contain" />
+                              : <span className="text-[9px] text-slate-400">—</span>
+                            }
+                          </div>
+                          <div>
+                            <div className="text-[9px] font-bold text-blue-600 uppercase">{m.brand}</div>
+                            <div className="text-sm font-bold text-slate-800">{m.version || m.name}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </section>
