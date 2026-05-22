@@ -61,16 +61,19 @@ export default function NuevoVehiculo() {
 
     let imgUrl = model.img_url
 
-    // Upload image if selected
     if (imageFile) {
       const ext = imageFile.name.split('.').pop()
-      const path = `${model.brand}_${model.name}_${model.version || 'default'}.${ext}`.replace(/\s/g, '_')
+      const path = `${model.brand}${model.name}${model.version || 'default'}${Date.now()}.${ext}`
+        .toLowerCase()
+        .replace(/[^a-z0-9.]/g, '')
       const { error } = await supabase.storage.from('vehicles').upload(path, imageFile, { upsert: true })
       if (!error) {
         const { data } = supabase.storage.from('vehicles').getPublicUrl(path)
         imgUrl = data.publicUrl
       } else {
-        toast('Error al subir imagen: ' + error.message)
+        toast('Error imagen: ' + error.message)
+        setLoading(false)
+        return
       }
     }
 
@@ -143,7 +146,9 @@ export default function NuevoVehiculo() {
               </div>
               <label className="flex-1 cursor-pointer">
                 <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-blue-300 hover:bg-blue-50 transition">
-                  <div className="text-sm font-bold text-slate-600">📁 {imageFile ? imageFile.name : 'Seleccionar imagen'}</div>
+                  <div className="text-sm font-bold text-slate-600">
+                    📁 {imageFile ? imageFile.name : 'Seleccionar imagen'}
+                  </div>
                   <div className="text-xs text-slate-400 mt-1">La imagen se sube al guardar · JPG, PNG, WebP</div>
                 </div>
                 <input type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
