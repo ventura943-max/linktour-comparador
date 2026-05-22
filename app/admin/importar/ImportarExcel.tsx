@@ -8,7 +8,7 @@ export default function ImportarExcel() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
-  const [preview, setPreview] = useState<string[]>([])
+  const [preview, setPreview] = useState<any[]>([])
   const [parsed, setParsed] = useState<any>(null)
 
   function toast(t: string) { setMsg(t); setTimeout(() => setMsg(''), 5000) }
@@ -23,26 +23,30 @@ export default function ImportarExcel() {
       const ws = wb.Sheets[wb.SheetNames[0]]
       const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
 
-      // Row 0 = headers: Category, Feature, then vehicle names
-      // Row 1 = subheaders: blank, blank, then version names
-      // Row 2+ = data rows
+      // Fila 0: Category, Feature, LINKTOUR ALUMI, , , LINKTOUR ALUMI ELITE, , LIUX BIG, , ...
+      // Fila 1: blank, blank, Alumi, Alumi Plus, Alumi Pro, Alumi Elite, Alumi Elite+, 15.0, 20.0
+      // Fila 2+: datos
 
-      const headerRow = rows[0] as string[]
-      const versionRow = rows[1] as string[]
+      const row0 = rows[0] as string[]
+      const row1 = rows[1] as string[]
 
-      // Build vehicle list from header row (cols 2+)
-      const vehicles: { brand: string, name: string, version: string, colIndex: number }[] = []
-      let currentBrand = ''
-      for (let c = 2; c < headerRow.length; c++) {
-        if (headerRow[c] && String(headerRow[c]).trim() !== '') {
-          currentBrand = String(headerRow[c]).trim()
+      // Build vehicles — only columns where row1 has a non-empty version
+      const vehicles: { brand: string, model: string, version: string, colIndex: number }[] = []
+      let currentGroup = ''
+
+      for (let c = 2; c < row0.length; c++) {
+        if (row0[c] && String(row0[c]).trim() !== '') {
+          currentGroup = String(row0[c]).trim()
         }
-        const version = versionRow[c] ? String(versionRow[c]).trim() : ''
-        // Parse brand and model from header like "LINKTOUR ALUMI" or "LIUX BIG"
-        const parts = currentBrand.split(' ')
-        const brand = parts[0] || currentBrand
-        const name = parts.slice(1).join(' ') || currentBrand
-        vehicles.push({ brand, name, version, colIndex: c })
+        const version = row1[c] ? String(row1[c]).trim() : ''
+        if (!version) continue // skip empty columns
+
+        // Parse brand and model from group header e.g. "LINKTOUR ALUMI" or "LIUX BIG"
+        const parts = currentGroup.split(' ')
+        const brand = parts[0] || ''
+        const model = parts.slice(1).join(' ') || ''
+
+        vehicles.push({ brand, model, version, colIndex: c })
       }
 
       // Build feature rows (row 2+)
@@ -62,7 +66,7 @@ export default function ImportarExcel() {
       }
 
       setParsed({ vehicles, featureRows })
-      setPreview(vehicles.map(v => `${v.brand} ${v.name} ${v.version}`.trim()))
+      setPreview(vehicles)
     }
     reader.readAsArrayBuffer(file)
   }
@@ -72,8 +76,6 @@ export default function ImportarExcel() {
     setLoading(true)
 
     const { vehicles, featureRows } = parsed
-
-    // Load categories and features from DB
     const { data: dbCats } = await supabase.from('categories').select('*')
     const { data: dbFeats } = await supabase.from('features').select('*')
 
@@ -82,10 +84,9 @@ export default function ImportarExcel() {
 
     for (const v of vehicles) {
       try {
-        // Create model
         const { data: saved } = await supabase.from('models').insert({
           brand: v.brand,
-          name: v.name,
+          name: v.model,
           version: v.version,
           is_active: true,
           sort_order: 0,
@@ -93,7 +94,6 @@ export default function ImportarExcel() {
 
         if (!saved) { errors++; continue }
 
-        // Match feature values
         const upserts: any[] = []
         for (const fr of featureRows) {
           const dbFeat = dbFeats?.find(f => {
@@ -136,11 +136,10 @@ export default function ImportarExcel() {
 
         <div className="bg-white rounded-2xl p-6 shadow-sm">
           <h2 className="font-black text-base mb-2 text-slate-700 uppercase tracking-wider">Formato esperado</h2>
-          <p className="text-sm text-slate-500 mb-3">El archivo debe tener este formato — el mismo que tu Excel actual:</p>
           <div className="bg-slate-50 rounded-xl p-4 text-xs font-mono text-slate-600 space-y-1">
-            <div>Fila 1: <span className="text-blue-600">Category · Feature · MARCA MODELO · MARCA MODELO · ...</span></div>
-            <div>Fila 2: <span className="text-blue-600">— · — · Versión · Versión · ...</span></div>
-            <div>Fila 3+: <span className="text-slate-400">datos de cada característica por vehículo</span></div>
+            <div>Fila 1: <span className="text-blue-600">Category · Feature · MARCA MODELO · · · MARCA MODELO2 · ·</span></div>
+            <div>Fila 2: <span className="text-blue-600">— · — · Versión1 · Versión2 · Versión3 · Versión1 · Versión2</span></div>
+            <div>Fila 3+: <span className="text-slate-400">datos</span></div>
           </div>
         </div>
 
@@ -158,10 +157,14 @@ export default function ImportarExcel() {
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <h2 className="font-black text-base mb-4 text-slate-700 uppercase tracking-wider">Vehículos detectados ({preview.length})</h2>
             <div className="space-y-2 mb-6">
-              {preview.map((v, i) => (
+              {preview.map((v: any, i: number) => (
                 <div key={i} className="flex items-center gap-3 p-3 border border-slate-100 rounded-xl">
                   <div className="w-6 h-6 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center text-xs font-bold">{i+1}</div>
-                  <div className="text-sm font-medium">{v}</div>
+                  <div>
+                    <span className="text-xs font-bold text-blue-600 uppercase mr-2">{v.brand}</span>
+                    <span className="text-sm font-bold">{v.model}</span>
+                    <span className="text-sm text-slate-400 ml-1">{v.version}</span>
+                  </div>
                 </div>
               ))}
             </div>
