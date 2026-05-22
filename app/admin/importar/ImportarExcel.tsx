@@ -21,28 +21,33 @@ export default function ImportarExcel() {
       const data = new Uint8Array(ev.target?.result as ArrayBuffer)
       const wb = XLSX.read(data, { type: 'array' })
       const ws = wb.Sheets[wb.SheetNames[0]]
+
+      // Read merged cells to expand group headers
+      const merges = ws['!merges'] || []
       const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
 
-      // Fila 0: Category, Feature, LINKTOUR ALUMI, , , LINKTOUR ALUMI ELITE, , LIUX BIG, , ...
-      // Fila 1: blank, blank, Alumi, Alumi Plus, Alumi Pro, Alumi Elite, Alumi Elite+, 15.0, 20.0
-      // Fila 2+: datos
+      // Expand merged cells in row 0
+      const row0 = [...(rows[0] as string[])]
+      for (const m of merges) {
+        if (m.s.r === 0) {
+          const val = row0[m.s.c]
+          for (let c = m.s.c; c <= m.e.c; c++) {
+            row0[c] = val
+          }
+        }
+      }
 
-      const row0 = rows[0] as string[]
       const row1 = rows[1] as string[]
 
       // Build vehicles — only columns where row1 has a non-empty version
       const vehicles: { brand: string, model: string, version: string, colIndex: number }[] = []
-      let currentGroup = ''
 
       for (let c = 2; c < row0.length; c++) {
-        if (row0[c] && String(row0[c]).trim() !== '') {
-          currentGroup = String(row0[c]).trim()
-        }
-        const version = row1[c] ? String(row1[c]).trim() : ''
-        if (!version) continue // skip empty columns
+        const group = String(row0[c] || '').trim()
+        const version = String(row1[c] || '').trim()
+        if (!group || !version) continue
 
-        // Parse brand and model from group header e.g. "LINKTOUR ALUMI" or "LIUX BIG"
-        const parts = currentGroup.split(' ')
+        const parts = group.split(' ')
         const brand = parts[0] || ''
         const model = parts.slice(1).join(' ') || ''
 
@@ -137,7 +142,7 @@ export default function ImportarExcel() {
         <div className="bg-white rounded-2xl p-6 shadow-sm">
           <h2 className="font-black text-base mb-2 text-slate-700 uppercase tracking-wider">Formato esperado</h2>
           <div className="bg-slate-50 rounded-xl p-4 text-xs font-mono text-slate-600 space-y-1">
-            <div>Fila 1: <span className="text-blue-600">Category · Feature · MARCA MODELO · · · MARCA MODELO2 · ·</span></div>
+            <div>Fila 1: <span className="text-blue-600">Category · Feature · [MARCA MODELO combinado] · [MARCA MODELO2]</span></div>
             <div>Fila 2: <span className="text-blue-600">— · — · Versión1 · Versión2 · Versión3 · Versión1 · Versión2</span></div>
             <div>Fila 3+: <span className="text-slate-400">datos</span></div>
           </div>
