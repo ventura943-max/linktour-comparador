@@ -10,13 +10,8 @@ export default function AdminPanel() {
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
 
-  const emptyModel = { brand:'', name:'', version:'', price:'', range_wmtc:'', max_speed:'', battery:'', power:'', torque:'', charge_time:'', img_url:'', is_active:true }
-  const [modelForm, setModelForm] = useState(emptyModel)
-  const [editModelId, setEditModelId] = useState<string|null>(null)
-
   const [catForm, setCatForm] = useState({ name:'', sort_order:0 })
   const [editCatId, setEditCatId] = useState<string|null>(null)
-
   const [featForm, setFeatForm] = useState({ name:'', category_id:'', type:'boolean', sort_order:0 })
   const [editFeatId, setEditFeatId] = useState<string|null>(null)
 
@@ -39,6 +34,23 @@ export default function AdminPanel() {
     if (!confirm('¿Eliminar este modelo?')) return
     await supabase.from('models').delete().eq('id', id)
     toast('Eliminado ✓'); await loadAll()
+  }
+
+  async function moveModel(id: string, dir: 'up' | 'down') {
+    const idx = models.findIndex(m => m.id === id)
+    const swapIdx = dir === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= models.length) return
+    const a = models[idx]
+    const b = models[swapIdx]
+    const newOrder = [...models]
+    newOrder[idx] = { ...a, sort_order: b.sort_order }
+    newOrder[swapIdx] = { ...b, sort_order: a.sort_order }
+    await Promise.all([
+      supabase.from('models').update({ sort_order: b.sort_order }).eq('id', a.id),
+      supabase.from('models').update({ sort_order: a.sort_order }).eq('id', b.id),
+    ])
+    setModels(newOrder.sort((x, y) => x.sort_order - y.sort_order))
+    toast('Orden actualizado ✓')
   }
 
   async function saveCat() {
@@ -102,7 +114,6 @@ export default function AdminPanel() {
       </header>
 
       <div className="max-w-5xl mx-auto p-6">
-
         <div className="flex items-center justify-between mb-4 gap-4">
           <div className="flex gap-2 border-b border-slate-200 flex-1">
             {[['models','🚗 Modelos'],['categories','📂 Categorías'],['features','📋 Características']].map(([id,label]) => (
@@ -120,11 +131,21 @@ export default function AdminPanel() {
 
         {tab === 'models' && (
           <div className="bg-white rounded-2xl p-6 shadow-sm">
-            <h2 className="font-black text-lg mb-4">Vehículos ({models.length})</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-black text-lg">Vehículos ({models.length})</h2>
+              <p className="text-xs text-slate-400">Usa las flechas para cambiar el orden en el comparador</p>
+            </div>
             <div className="space-y-2">
-              {models.map(m => (
+              {models.map((m, idx) => (
                 <div key={m.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-xl hover:bg-slate-50">
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex flex-col gap-1">
+                      <button onClick={() => moveModel(m.id, 'up')} disabled={idx === 0}
+                        className="w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs leading-none">▲</button>
+                      <button onClick={() => moveModel(m.id, 'down')} disabled={idx === models.length - 1}
+                        className="w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs leading-none">▼</button>
+                    </div>
+                    <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-xs font-bold text-slate-500">{idx + 1}</div>
                     {m.img_url
                       ? <img src={m.img_url} className="w-16 h-10 object-contain rounded-lg bg-slate-50 border border-slate-100" />
                       : <div className="w-16 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-xs text-slate-400">Sin img</div>
@@ -197,7 +218,6 @@ export default function AdminPanel() {
                     </div>
                   </div>
                 ))}
-                {categories.length === 0 && <p className="text-sm text-slate-400 text-center py-4">Sin categorías todavía</p>}
               </div>
             </div>
           </div>
@@ -269,7 +289,6 @@ export default function AdminPanel() {
                     </div>
                   )
                 })}
-                {features.length === 0 && <p className="text-sm text-slate-400 text-center py-4">Sin características todavía</p>}
               </div>
             </div>
           </div>
