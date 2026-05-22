@@ -21,6 +21,12 @@ const LANGS: { code: Lang, flag: string, label: string }[] = [
   { code: 'it', flag: '🇮🇹', label: 'IT' },
 ]
 
+function getName(item: any, lang: Lang) {
+  if (lang === 'es' && item.name_es) return item.name_es
+  if (lang === 'it' && item.name_it) return item.name_it
+  return item.name
+}
+
 function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMobileOpen, lang, setLang, t }: any) {
   const items = [
     { id: 'comparador', label: t.comparador, icon: <IconComparador /> },
@@ -28,15 +34,11 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
     { id: 'categorias', label: t.categorias, icon: <IconCategorias /> },
     { id: 'analisis', label: t.analisis, icon: <IconAnalisis /> },
   ]
-
   const w = collapsed ? 'w-16' : 'w-56'
-
   return (
     <>
       {mobileOpen && <div className="fixed inset-0 bg-black/40 z-20 md:hidden" onClick={() => setMobileOpen(false)} />}
-      <aside className={`fixed top-0 left-0 h-full ${w} bg-[#071225] z-30 flex flex-col transition-all duration-200
-        ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
-
+      <aside className={`fixed top-0 left-0 h-full ${w} bg-[#071225] z-30 flex flex-col transition-all duration-200 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
         <div className={`flex items-center border-b border-white/10 h-14 ${collapsed ? 'justify-center px-0' : 'px-5 justify-between'}`}>
           {!collapsed && (
             <div>
@@ -49,7 +51,6 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
             <IconChevron collapsed={collapsed} />
           </button>
         </div>
-
         <nav className="flex-1 py-4 px-2 space-y-1">
           {items.map(item => (
             <button key={item.id} onClick={() => { setActive(item.id); setMobileOpen(false) }}
@@ -62,12 +63,9 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
             </button>
           ))}
         </nav>
-
-        {/* LANGUAGE FLAGS */}
         <div className={`border-t border-white/10 py-3 px-2 ${collapsed ? 'flex flex-col items-center gap-1' : 'flex items-center justify-center gap-1'}`}>
           {LANGS.map(l => (
-            <button key={l.code} onClick={() => setLang(l.code)}
-              title={l.label}
+            <button key={l.code} onClick={() => setLang(l.code)} title={l.label}
               className={`flex items-center gap-1 rounded-lg px-2 py-1.5 transition text-sm
                 ${lang === l.code ? 'bg-white/20 text-white' : 'text-slate-500 hover:bg-white/10 hover:text-white'}`}>
               <span>{l.flag}</span>
@@ -75,13 +73,10 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
             </button>
           ))}
         </div>
-
-        {/* LOGOUT */}
         <div className="border-t border-white/10 py-3 px-2">
           <button onClick={async () => { await fetch('/api/auth', { method: 'DELETE' }); window.location.href = '/admin/login' }}
             title={collapsed ? t.cerrarSesion : ''}
-            className={`w-full flex items-center gap-3 text-slate-500 hover:text-red-400 transition rounded-xl py-2
-              ${collapsed ? 'justify-center px-0' : 'px-3'}`}>
+            className={`w-full flex items-center gap-3 text-slate-500 hover:text-red-400 transition rounded-xl py-2 ${collapsed ? 'justify-center px-0' : 'px-3'}`}>
             <IconLogout />
             {!collapsed && <span className="text-xs">{t.cerrarSesion}</span>}
           </button>
@@ -91,7 +86,7 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
   )
 }
 
-function Comparador({ models, categories, features, values, t }: any) {
+function Comparador({ models, categories, features, values, t, lang }: any) {
   const [activeCat, setActiveCat] = useState('all')
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>(models.slice(0, 3).map((m: any) => m.id))
@@ -139,10 +134,12 @@ function Comparador({ models, categories, features, values, t }: any) {
     const feats = features.filter((f: any) => {
       if (f.category_id !== cat.id) return false
       if (activeCat !== 'all' && cat.id !== activeCat) return false
-      if (search && !f.name.toLowerCase().includes(search.toLowerCase()) && !cat.name.toLowerCase().includes(search.toLowerCase())) return false
+      const fname = getName(f, lang).toLowerCase()
+      const cname = getName(cat, lang).toLowerCase()
+      if (search && !fname.includes(search.toLowerCase()) && !cname.includes(search.toLowerCase())) return false
       return true
     })
-    return feats.map((f: any, fi: number) => ({ ...f, catName: cat.name, catId: cat.id, isFirst: fi === 0 }))
+    return feats.map((f: any, fi: number) => ({ ...f, catName: getName(cat, lang), catId: cat.id, isFirst: fi === 0 }))
   })
 
   return (
@@ -208,8 +205,9 @@ function Comparador({ models, categories, features, values, t }: any) {
           <span className="text-xs text-slate-400 whitespace-nowrap">{filteredFeatures.length} {t.espec}</span>
         </div>
       </div>
+
       <div className="flex gap-2 flex-wrap mb-4">
-        {[{ id: 'all', name: t.todo }, ...categories].map((c: any) => (
+        {[{ id: 'all', name: t.todo }, ...categories.map((c: any) => ({ ...c, name: getName(c, lang) }))].map((c: any) => (
           <button key={c.id} onClick={() => setActiveCat(c.id)}
             className={`px-3 py-1.5 rounded-full text-xs font-bold border transition whitespace-nowrap ${activeCat === c.id ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
             {c.name}
@@ -242,7 +240,7 @@ function Comparador({ models, categories, features, values, t }: any) {
             {filteredFeatures.map((feat: any) => (
               <tr key={feat.id} className={feat.isFirst ? 'border-t-2 border-slate-300' : ''}>
                 <td className="border border-slate-100 px-1 py-1.5 text-[9px] font-bold text-slate-500 bg-slate-50 overflow-hidden text-ellipsis whitespace-nowrap">{feat.isFirst ? feat.catName : ''}</td>
-                <td className="border border-slate-100 px-1 py-1.5 text-[9px] text-slate-700 overflow-hidden text-ellipsis whitespace-nowrap" title={feat.name}>{feat.name}</td>
+                <td className="border border-slate-100 px-1 py-1.5 text-[9px] text-slate-700 overflow-hidden text-ellipsis whitespace-nowrap" title={getName(feat, lang)}>{getName(feat, lang)}</td>
                 {selectedModels.map((m: any) => {
                   const v = val(feat.id, m.id)
                   const lo = v.toLowerCase().trim()
@@ -465,7 +463,7 @@ export default function ComparadorClient({ models, categories, features, values 
           <div className="w-8" />
         </div>
         <main className="flex-1 p-4 md:p-8">
-          {active === 'comparador' && <Comparador models={models} categories={categories} features={features} values={values} t={t} />}
+          {active === 'comparador' && <Comparador models={models} categories={categories} features={features} values={values} t={t} lang={lang} />}
           {active === 'modelos' && <Modelos t={t} />}
           {active === 'categorias' && <Categorias t={t} />}
           {active === 'analisis' && (
