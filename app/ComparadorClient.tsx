@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { translations, Lang, T } from '@/lib/i18n'
 
 const IconComparador = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="18"/><rect x="14" y="3" width="7" height="18"/></svg>
 const IconModelos = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 17H5a2 2 0 01-2-2V7l3-4h12l3 4v8a2 2 0 01-2 2z"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg>
@@ -14,12 +15,18 @@ const IconChevron = ({ collapsed }: { collapsed: boolean }) => (
   </svg>
 )
 
-function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMobileOpen }: any) {
+const LANGS: { code: Lang, flag: string, label: string }[] = [
+  { code: 'es', flag: '🇪🇸', label: 'ES' },
+  { code: 'en', flag: '🇬🇧', label: 'EN' },
+  { code: 'it', flag: '🇮🇹', label: 'IT' },
+]
+
+function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMobileOpen, lang, setLang, t }: any) {
   const items = [
-    { id: 'comparador', label: 'Comparador', icon: <IconComparador /> },
-    { id: 'modelos', label: 'Modelos', icon: <IconModelos /> },
-    { id: 'categorias', label: 'Categorías', icon: <IconCategorias /> },
-    { id: 'analisis', label: 'Análisis comparativo', icon: <IconAnalisis /> },
+    { id: 'comparador', label: t.comparador, icon: <IconComparador /> },
+    { id: 'modelos', label: t.modelos, icon: <IconModelos /> },
+    { id: 'categorias', label: t.categorias, icon: <IconCategorias /> },
+    { id: 'analisis', label: t.analisis, icon: <IconAnalisis /> },
   ]
 
   const w = collapsed ? 'w-16' : 'w-56'
@@ -30,12 +37,11 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
       <aside className={`fixed top-0 left-0 h-full ${w} bg-[#071225] z-30 flex flex-col transition-all duration-200
         ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
 
-        {/* Logo */}
         <div className={`flex items-center border-b border-white/10 h-14 ${collapsed ? 'justify-center px-0' : 'px-5 justify-between'}`}>
           {!collapsed && (
             <div>
               <div className="font-black text-lg tracking-widest text-white leading-none">LIUX</div>
-              <div className="text-[8px] tracking-[.3em] text-slate-400 mt-0.5">COMPARADOR</div>
+              <div className="text-[8px] tracking-[.3em] text-slate-400 mt-0.5">{t.appName}</div>
             </div>
           )}
           <button onClick={() => setCollapsed(!collapsed)}
@@ -44,7 +50,6 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
           </button>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 py-4 px-2 space-y-1">
           {items.map(item => (
             <button key={item.id} onClick={() => { setActive(item.id); setMobileOpen(false) }}
@@ -58,14 +63,27 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
           ))}
         </nav>
 
-        {/* Logout */}
-        <div className={`border-t border-white/10 py-3 px-2`}>
+        {/* LANGUAGE FLAGS */}
+        <div className={`border-t border-white/10 py-3 px-2 ${collapsed ? 'flex flex-col items-center gap-1' : 'flex items-center justify-center gap-1'}`}>
+          {LANGS.map(l => (
+            <button key={l.code} onClick={() => setLang(l.code)}
+              title={l.label}
+              className={`flex items-center gap-1 rounded-lg px-2 py-1.5 transition text-sm
+                ${lang === l.code ? 'bg-white/20 text-white' : 'text-slate-500 hover:bg-white/10 hover:text-white'}`}>
+              <span>{l.flag}</span>
+              {!collapsed && <span className="text-xs font-bold">{l.label}</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* LOGOUT */}
+        <div className="border-t border-white/10 py-3 px-2">
           <button onClick={async () => { await fetch('/api/auth', { method: 'DELETE' }); window.location.href = '/admin/login' }}
-            title={collapsed ? 'Cerrar sesión' : ''}
+            title={collapsed ? t.cerrarSesion : ''}
             className={`w-full flex items-center gap-3 text-slate-500 hover:text-red-400 transition rounded-xl py-2
               ${collapsed ? 'justify-center px-0' : 'px-3'}`}>
             <IconLogout />
-            {!collapsed && <span className="text-xs">Cerrar sesión</span>}
+            {!collapsed && <span className="text-xs">{t.cerrarSesion}</span>}
           </button>
         </div>
       </aside>
@@ -73,7 +91,7 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
   )
 }
 
-function Comparador({ models, categories, features, values }: any) {
+function Comparador({ models, categories, features, values, t }: any) {
   const [activeCat, setActiveCat] = useState('all')
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>(models.slice(0, 3).map((m: any) => m.id))
@@ -109,12 +127,12 @@ function Comparador({ models, categories, features, values }: any) {
   })
 
   const specRows = [
-    ['Range WMTC', 'Driving Mileage under WMTC mode (km)'],
-    ['Max speed', 'Maximum speed (km/h)'],
-    ['Battery', 'Battery capacity (kWh)'],
-    ['Peak power', 'Motor peak power (kW)'],
-    ['Torque', 'Motor torque (Nm)'],
-    ['Charge 0-100%', 'AC charging time 0-100% (h)'],
+    [t.rangeWmtc, 'Driving Mileage under WMTC mode (km)'],
+    [t.maxSpeed, 'Maximum speed (km/h)'],
+    [t.battery, 'Battery capacity (kWh)'],
+    [t.peakPower, 'Motor peak power (kW)'],
+    [t.torque, 'Motor torque (Nm)'],
+    [t.charge, 'AC charging time 0-100% (h)'],
   ]
 
   const filteredFeatures = categories.flatMap((cat: any) => {
@@ -129,8 +147,8 @@ function Comparador({ models, categories, features, values }: any) {
 
   return (
     <div>
-      <h1 className="text-2xl md:text-3xl font-black tracking-tight mb-1">Comparador de Modelos</h1>
-      <p className="text-slate-500 text-sm mb-6">Comparativa técnica y comercial</p>
+      <h1 className="text-2xl md:text-3xl font-black tracking-tight mb-1">{t.comparadorTitle}</h1>
+      <p className="text-slate-500 text-sm mb-6">{t.comparadorSubtitle}</p>
 
       <div className="overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 mb-8">
         <div className="flex gap-3 items-stretch" style={{ minWidth: 'max-content' }}>
@@ -141,7 +159,7 @@ function Comparador({ models, categories, features, values }: any) {
               <div className="text-[8px] font-black tracking-widest text-blue-600 uppercase">{m.brand} {m.name}</div>
               <div className="font-black text-base tracking-tight mb-2">{m.version || m.name}</div>
               <div className="h-20 flex items-center justify-center overflow-hidden mb-2 bg-slate-50 rounded-xl">
-                {m.img_url ? <img src={m.img_url} alt={m.name} className="max-h-20 max-w-full object-contain" /> : <span className="text-xs text-slate-400">Sin imagen</span>}
+                {m.img_url ? <img src={m.img_url} alt={m.name} className="max-h-20 max-w-full object-contain" /> : <span className="text-xs text-slate-400">{t.sinImagen}</span>}
               </div>
               {specRows.map(([label, featName]) => (
                 <div key={label} className="flex justify-between border-t border-slate-100 pt-1 gap-1">
@@ -156,11 +174,11 @@ function Comparador({ models, categories, features, values }: any) {
               <button onClick={() => setShowPicker(!showPicker)}
                 className="w-36 h-full min-h-[260px] border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition cursor-pointer bg-white">
                 <div className="w-8 h-8 rounded-full border-2 border-current flex items-center justify-center text-xl">+</div>
-                <div className="text-xs font-bold text-center px-2">Añadir modelo</div>
+                <div className="text-xs font-bold text-center px-2">{t.añadirModelo}</div>
               </button>
               {showPicker && (
                 <div className="absolute top-0 left-0 w-52 bg-white rounded-2xl shadow-xl border border-slate-200 z-20 overflow-hidden">
-                  <div className="px-4 py-3 border-b border-slate-100 text-xs font-black text-slate-500 uppercase tracking-wider">Selecciona un modelo</div>
+                  <div className="px-4 py-3 border-b border-slate-100 text-xs font-black text-slate-500 uppercase tracking-wider">{t.seleccionaModelo}</div>
                   <div className="max-h-64 overflow-y-auto">
                     {availableModels.map((m: any) => (
                       <button key={m.id} onClick={() => { setSelectedIds([...selectedIds, m.id]); setShowPicker(false) }}
@@ -183,15 +201,15 @@ function Comparador({ models, categories, features, values }: any) {
       </div>
 
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-3 gap-2">
-        <h2 className="text-xl font-black tracking-tight">Ficha completa</h2>
+        <h2 className="text-xl font-black tracking-tight">{t.fichaCompleta}</h2>
         <div className="flex items-center gap-2">
-          <input type="text" placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)}
+          <input type="text" placeholder={t.buscar} value={search} onChange={e => setSearch(e.target.value)}
             className="border border-slate-200 rounded-full px-3 py-2 text-sm outline-none focus:border-blue-400 flex-1 md:min-w-[200px]" />
-          <span className="text-xs text-slate-400 whitespace-nowrap">{filteredFeatures.length} espec.</span>
+          <span className="text-xs text-slate-400 whitespace-nowrap">{filteredFeatures.length} {t.espec}</span>
         </div>
       </div>
       <div className="flex gap-2 flex-wrap mb-4">
-        {[{ id: 'all', name: 'Todo' }, ...categories].map((c: any) => (
+        {[{ id: 'all', name: t.todo }, ...categories].map((c: any) => (
           <button key={c.id} onClick={() => setActiveCat(c.id)}
             className={`px-3 py-1.5 rounded-full text-xs font-bold border transition whitespace-nowrap ${activeCat === c.id ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
             {c.name}
@@ -213,8 +231,8 @@ function Comparador({ models, categories, features, values }: any) {
               ))}
             </tr>
             <tr>
-              <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px]">Cat.</th>
-              <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px]">Característica</th>
+              <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px]">{t.cat}</th>
+              <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px]">{t.caracteristica}</th>
               {selectedModels.map((m: any) => (
                 <th key={m.id} className="bg-[#081224] text-white text-center px-1 py-2 font-black text-[8px]">{m.version || m.name}</th>
               ))}
@@ -241,7 +259,7 @@ function Comparador({ models, categories, features, values }: any) {
   )
 }
 
-function Modelos() {
+function Modelos({ t }: { t: T }) {
   const [models, setModels] = useState<any[]>([])
   const [msg, setMsg] = useState('')
   useEffect(() => { load() }, [])
@@ -249,23 +267,23 @@ function Modelos() {
     const { data } = await supabase.from('models').select('*').order('sort_order')
     setModels(data || [])
   }
-  function toast(t: string) { setMsg(t); setTimeout(() => setMsg(''), 3000) }
+  function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 3000) }
   async function deleteModel(id: string) {
-    if (!confirm('¿Eliminar este modelo?')) return
+    if (!confirm(t.eliminarModelo)) return
     await supabase.from('models').delete().eq('id', id)
-    toast('Eliminado ✓'); load()
+    toast(t.eliminado); load()
   }
   return (
     <div>
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-black tracking-tight">Modelos</h1>
-          <p className="text-slate-500 text-sm">Gestiona los vehículos del comparador</p>
+          <h1 className="text-2xl font-black tracking-tight">{t.modelosTitle}</h1>
+          <p className="text-slate-500 text-sm">{t.modelosSubtitle}</p>
         </div>
         <div className="flex gap-2">
-          <a href="/admin/importar" className="px-4 py-2 border border-slate-300 bg-white text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50">⬆ Importar Excel</a>
-          <a href="/admin/nuevo-vehiculo" className="px-4 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg hover:bg-[#162040]">+ Nuevo vehículo</a>
+          <a href="/admin/importar" className="px-4 py-2 border border-slate-300 bg-white text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50">{t.importarExcel}</a>
+          <a href="/admin/nuevo-vehiculo" className="px-4 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg hover:bg-[#162040]">{t.nuevoVehiculo}</a>
         </div>
       </div>
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
@@ -274,7 +292,7 @@ function Modelos() {
             <div key={m.id} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50">
               <div className="flex items-center gap-4">
                 <div className="w-5 text-xs font-bold text-slate-300">{idx + 1}</div>
-                {m.img_url ? <img src={m.img_url} className="w-16 h-10 object-contain rounded-lg bg-slate-50 border border-slate-100" /> : <div className="w-16 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-xs text-slate-400">Sin img</div>}
+                {m.img_url ? <img src={m.img_url} className="w-16 h-10 object-contain rounded-lg bg-slate-50 border border-slate-100" /> : <div className="w-16 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-xs text-slate-400">{t.sinImagen}</div>}
                 <div>
                   <div className="text-xs font-bold text-blue-600 uppercase">{m.brand}</div>
                   <div className="font-bold text-sm">{m.name} {m.version && <span className="text-slate-400 font-normal">{m.version}</span>}</div>
@@ -282,20 +300,20 @@ function Modelos() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`text-xs font-bold px-2 py-1 rounded-full ${m.is_active ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{m.is_active ? 'Visible' : 'Oculto'}</span>
-                <a href={`/admin/nuevo-vehiculo?id=${m.id}`} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏ Editar</a>
-                <button onClick={() => deleteModel(m.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button>
+                <span className={`text-xs font-bold px-2 py-1 rounded-full ${m.is_active ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{m.is_active ? t.visible : t.oculto}</span>
+                <a href={`/admin/nuevo-vehiculo?id=${m.id}`} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">{t.editar}</a>
+                <button onClick={() => deleteModel(m.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">{t.eliminar}</button>
               </div>
             </div>
           ))}
-          {models.length === 0 && <div className="text-center py-12 text-slate-400"><div className="text-4xl mb-3">🚗</div><div className="font-bold">Sin vehículos todavía</div></div>}
+          {models.length === 0 && <div className="text-center py-12 text-slate-400"><div className="text-4xl mb-3">🚗</div><div className="font-bold">{t.sinVehiculos}</div></div>}
         </div>
       </div>
     </div>
   )
 }
 
-function Categorias() {
+function Categorias({ t }: { t: T }) {
   const [categories, setCategories] = useState<any[]>([])
   const [features, setFeatures] = useState<any[]>([])
   const [msg, setMsg] = useState('')
@@ -310,29 +328,29 @@ function Categorias() {
     const [c, f] = await Promise.all([supabase.from('categories').select('*').order('sort_order'), supabase.from('features').select('*').order('sort_order')])
     setCategories(c.data || []); setFeatures(f.data || [])
   }
-  function toast(t: string) { setMsg(t); setTimeout(() => setMsg(''), 3000) }
+  function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 3000) }
 
   async function saveCat() {
-    if (!catForm.name) { toast('Nombre obligatorio'); return }
-    if (editCatId) { await supabase.from('categories').update(catForm).eq('id', editCatId) }
-    else { await supabase.from('categories').insert(catForm) }
-    toast('Guardado ✓'); setCatForm({ name: '', sort_order: 0 }); setEditCatId(null); loadAll()
+    if (!catForm.name) { toast(t.nombreObligatorio); return }
+    if (editCatId) await supabase.from('categories').update(catForm).eq('id', editCatId)
+    else await supabase.from('categories').insert(catForm)
+    toast(t.guardado); setCatForm({ name: '', sort_order: 0 }); setEditCatId(null); loadAll()
   }
   async function deleteCat(id: string) {
-    if (!confirm('¿Eliminar categoría y sus características?')) return
+    if (!confirm(t.eliminarCategoria)) return
     await supabase.from('categories').delete().eq('id', id)
-    toast('Eliminado ✓'); loadAll()
+    toast(t.eliminado); loadAll()
   }
   async function saveFeat() {
-    if (!featForm.name || !featForm.category_id) { toast('Nombre y categoría obligatorios'); return }
-    if (editFeatId) { await supabase.from('features').update(featForm).eq('id', editFeatId) }
-    else { await supabase.from('features').insert(featForm) }
-    toast('Guardado ✓'); setFeatForm({ name: '', category_id: '', type: 'boolean', sort_order: 0 }); setEditFeatId(null); loadAll()
+    if (!featForm.name || !featForm.category_id) { toast(t.nombreCatObligatorio); return }
+    if (editFeatId) await supabase.from('features').update(featForm).eq('id', editFeatId)
+    else await supabase.from('features').insert(featForm)
+    toast(t.guardado); setFeatForm({ name: '', category_id: '', type: 'boolean', sort_order: 0 }); setEditFeatId(null); loadAll()
   }
   async function deleteFeat(id: string) {
-    if (!confirm('¿Eliminar esta característica?')) return
+    if (!confirm(t.eliminarCaracteristica)) return
     await supabase.from('features').delete().eq('id', id)
-    toast('Eliminado ✓'); loadAll()
+    toast(t.eliminado); loadAll()
   }
 
   const ic = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
@@ -341,29 +359,29 @@ function Categorias() {
   return (
     <div>
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
-      <h1 className="text-2xl font-black tracking-tight mb-1">Categorías</h1>
-      <p className="text-slate-500 text-sm mb-6">Gestiona categorías y características del comparador</p>
+      <h1 className="text-2xl font-black tracking-tight mb-1">{t.categoriasTitle}</h1>
+      <p className="text-slate-500 text-sm mb-6">{t.categoriasSubtitle}</p>
       <div className="flex gap-2 mb-6">
-        <button onClick={() => setTab('cats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'cats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>Categorías</button>
-        <button onClick={() => setTab('feats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'feats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>Características</button>
+        <button onClick={() => setTab('cats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'cats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>{t.categoriasTitle}</button>
+        <button onClick={() => setTab('feats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'feats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>{t.caracteristicas}</button>
       </div>
       {tab === 'cats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
-            <h2 className="font-black text-base mb-4">{editCatId ? 'Editar' : 'Añadir categoría'}</h2>
-            <div className="mb-3"><label className={lc}>Nombre</label><input className={ic} value={catForm.name} onChange={e => setCatForm({ ...catForm, name: e.target.value })} /></div>
-            <div className="mb-4"><label className={lc}>Orden</label><input type="number" className={ic} value={catForm.sort_order} onChange={e => setCatForm({ ...catForm, sort_order: parseInt(e.target.value) })} /></div>
+            <h2 className="font-black text-base mb-4">{editCatId ? t.editarCategoria : t.añadirCategoria}</h2>
+            <div className="mb-3"><label className={lc}>{t.nombre}</label><input className={ic} value={catForm.name} onChange={e => setCatForm({ ...catForm, name: e.target.value })} /></div>
+            <div className="mb-4"><label className={lc}>{t.orden}</label><input type="number" className={ic} value={catForm.sort_order} onChange={e => setCatForm({ ...catForm, sort_order: parseInt(e.target.value) })} /></div>
             <div className="flex gap-2">
-              {editCatId && <button onClick={() => { setEditCatId(null); setCatForm({ name: '', sort_order: 0 }) }} className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-500">Cancelar</button>}
-              <button onClick={saveCat} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg">{editCatId ? 'Actualizar' : 'Añadir'}</button>
+              {editCatId && <button onClick={() => { setEditCatId(null); setCatForm({ name: '', sort_order: 0 }) }} className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-500">{t.cancelar}</button>}
+              <button onClick={saveCat} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg">{editCatId ? t.actualizar : t.añadir}</button>
             </div>
           </div>
           <div className="bg-white rounded-2xl p-6 shadow-sm">
-            <h2 className="font-black text-base mb-4">Categorías ({categories.length})</h2>
+            <h2 className="font-black text-base mb-4">{t.categoriasTitle} ({categories.length})</h2>
             <div className="space-y-2">
               {categories.map(c => (
                 <div key={c.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-xl hover:bg-slate-50">
-                  <div><div className="font-bold text-sm">{c.name}</div><div className="text-xs text-slate-400">Orden: {c.sort_order}</div></div>
+                  <div><div className="font-bold text-sm">{c.name}</div><div className="text-xs text-slate-400">{t.orden}: {c.sort_order}</div></div>
                   <div className="flex gap-2">
                     <button onClick={() => { setEditCatId(c.id); setCatForm(c) }} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏</button>
                     <button onClick={() => deleteCat(c.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button>
@@ -377,31 +395,31 @@ function Categorias() {
       {tab === 'feats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
-            <h2 className="font-black text-base mb-4">{editFeatId ? 'Editar' : 'Añadir característica'}</h2>
-            <div className="mb-3"><label className={lc}>Nombre</label><input className={ic} value={featForm.name} onChange={e => setFeatForm({ ...featForm, name: e.target.value })} /></div>
+            <h2 className="font-black text-base mb-4">{editFeatId ? t.editarCaracteristica : t.añadirCaracteristica}</h2>
+            <div className="mb-3"><label className={lc}>{t.nombre}</label><input className={ic} value={featForm.name} onChange={e => setFeatForm({ ...featForm, name: e.target.value })} /></div>
             <div className="mb-3">
-              <label className={lc}>Categoría</label>
+              <label className={lc}>{t.categoria}</label>
               <select className={ic} value={featForm.category_id} onChange={e => setFeatForm({ ...featForm, category_id: e.target.value })}>
-                <option value="">Selecciona...</option>
+                <option value="">{t.selecciona}</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className="mb-3">
-              <label className={lc}>Tipo</label>
+              <label className={lc}>{t.tipo}</label>
               <select className={ic} value={featForm.type} onChange={e => setFeatForm({ ...featForm, type: e.target.value })}>
-                <option value="boolean">Sí / No</option>
-                <option value="text">Texto</option>
-                <option value="numeric">Numérico</option>
+                <option value="boolean">{t.siNo}</option>
+                <option value="text">{t.texto}</option>
+                <option value="numeric">{t.numerico}</option>
               </select>
             </div>
-            <div className="mb-4"><label className={lc}>Orden</label><input type="number" className={ic} value={featForm.sort_order} onChange={e => setFeatForm({ ...featForm, sort_order: parseInt(e.target.value) })} /></div>
+            <div className="mb-4"><label className={lc}>{t.orden}</label><input type="number" className={ic} value={featForm.sort_order} onChange={e => setFeatForm({ ...featForm, sort_order: parseInt(e.target.value) })} /></div>
             <div className="flex gap-2">
-              {editFeatId && <button onClick={() => { setEditFeatId(null); setFeatForm({ name: '', category_id: '', type: 'boolean', sort_order: 0 }) }} className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-500">Cancelar</button>}
-              <button onClick={saveFeat} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg">{editFeatId ? 'Actualizar' : 'Añadir'}</button>
+              {editFeatId && <button onClick={() => { setEditFeatId(null); setFeatForm({ name: '', category_id: '', type: 'boolean', sort_order: 0 }) }} className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-500">{t.cancelar}</button>}
+              <button onClick={saveFeat} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg">{editFeatId ? t.actualizar : t.añadir}</button>
             </div>
           </div>
           <div className="bg-white rounded-2xl p-6 shadow-sm overflow-y-auto max-h-[600px]">
-            <h2 className="font-black text-base mb-4">Características ({features.length})</h2>
+            <h2 className="font-black text-base mb-4">{t.caracteristicas} ({features.length})</h2>
             {categories.map(cat => {
               const catFeats = features.filter(f => f.category_id === cat.id)
               if (!catFeats.length) return null
@@ -431,12 +449,15 @@ export default function ComparadorClient({ models, categories, features, values 
   const [active, setActive] = useState('comparador')
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [lang, setLang] = useState<Lang>('es')
 
+  const t = translations[lang]
   const ml = collapsed ? 'md:ml-16' : 'md:ml-56'
 
   return (
     <div className="flex min-h-screen bg-[#f3f6fa]">
-      <Sidebar active={active} setActive={setActive} collapsed={collapsed} setCollapsed={setCollapsed} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+      <Sidebar active={active} setActive={setActive} collapsed={collapsed} setCollapsed={setCollapsed}
+        mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} lang={lang} setLang={setLang} t={t} />
       <div className={`flex-1 ${ml} min-h-screen flex flex-col transition-all duration-200`}>
         <div className="md:hidden flex items-center justify-between bg-[#071225] text-white px-4 h-14 sticky top-0 z-10">
           <button onClick={() => setMobileOpen(true)} className="text-xl text-slate-300">☰</button>
@@ -444,15 +465,15 @@ export default function ComparadorClient({ models, categories, features, values 
           <div className="w-8" />
         </div>
         <main className="flex-1 p-4 md:p-8">
-          {active === 'comparador' && <Comparador models={models} categories={categories} features={features} values={values} />}
-          {active === 'modelos' && <Modelos />}
-          {active === 'categorias' && <Categorias />}
+          {active === 'comparador' && <Comparador models={models} categories={categories} features={features} values={values} t={t} />}
+          {active === 'modelos' && <Modelos t={t} />}
+          {active === 'categorias' && <Categorias t={t} />}
           {active === 'analisis' && (
             <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
               <div className="text-6xl mb-4">📊</div>
-              <h1 className="text-2xl font-black tracking-tight mb-2">Análisis comparativo</h1>
-              <div className="inline-block bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2 rounded-full text-sm font-bold">En construcción</div>
-              <p className="text-slate-400 text-sm mt-3">Próximamente disponible</p>
+              <h1 className="text-2xl font-black tracking-tight mb-2">{t.analisis}</h1>
+              <div className="inline-block bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2 rounded-full text-sm font-bold">{t.enConstruccion}</div>
+              <p className="text-slate-400 text-sm mt-3">{t.proximamente}</p>
             </div>
           )}
         </main>
