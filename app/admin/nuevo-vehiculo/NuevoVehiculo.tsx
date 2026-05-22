@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, uploadImage } from '@/lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 export default function NuevoVehiculo() {
@@ -9,6 +9,7 @@ export default function NuevoVehiculo() {
   const modelId = params.get('id')
 
   const [loading, setLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState('')
   const [categories, setCategories] = useState<any[]>([])
   const [features, setFeatures] = useState<any[]>([])
@@ -43,6 +44,22 @@ export default function NuevoVehiculo() {
   }
 
   function toast(t: string) { setMsg(t); setTimeout(() => setMsg(''), 3000) }
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!modelId && !model.name) { toast('Guarda el vehículo primero antes de subir imagen'); return }
+    setUploading(true)
+    const tempId = modelId || `temp_${Date.now()}`
+    const url = await uploadImage(file, tempId)
+    if (url) {
+      setModel({...model, img_url: url})
+      toast('Imagen subida ✓')
+    } else {
+      toast('Error al subir imagen')
+    }
+    setUploading(false)
+  }
 
   async function save() {
     if (!model.brand || !model.name) { toast('Marca y modelo son obligatorios'); return }
@@ -98,8 +115,36 @@ export default function NuevoVehiculo() {
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div><label className={lc}>Precio</label><input className={ic} value={model.price} onChange={e => setModel({...model, price:e.target.value})} placeholder="ej. 16.450 €" /></div>
-            <div><label className={lc}>URL imagen</label><input className={ic} value={model.img_url} onChange={e => setModel({...model, img_url:e.target.value})} placeholder="https://..." /></div>
           </div>
+
+          {/* IMAGE UPLOAD */}
+          <div className="mb-4">
+            <label className={lc}>Imagen del vehículo</label>
+            <div className="flex items-center gap-4">
+              <div className="w-32 h-24 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center overflow-hidden">
+                {model.img_url
+                  ? <img src={model.img_url} alt="preview" className="max-w-full max-h-full object-contain" />
+                  : <span className="text-xs text-slate-400">Sin imagen</span>
+                }
+              </div>
+              <div className="flex-1">
+                <label className="block w-full cursor-pointer">
+                  <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-blue-300 hover:bg-blue-50 transition">
+                    <div className="text-sm font-bold text-slate-600">
+                      {uploading ? 'Subiendo...' : '📁 Seleccionar imagen'}
+                    </div>
+                    <div className="text-xs text-slate-400 mt-1">JPG, PNG, WebP</div>
+                  </div>
+                  <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" disabled={uploading} />
+                </label>
+                {model.img_url && (
+                  <button onClick={() => setModel({...model, img_url:''})}
+                    className="mt-2 text-xs text-red-500 hover:text-red-700">✕ Eliminar imagen</button>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center gap-2">
             <input type="checkbox" id="active" checked={model.is_active} onChange={e => setModel({...model, is_active:e.target.checked})} />
             <label htmlFor="active" className="text-sm text-slate-600">Visible en el comparador</label>
@@ -135,7 +180,6 @@ export default function NuevoVehiculo() {
         <button onClick={save} disabled={loading} className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-50 text-sm">
           {loading ? 'Guardando...' : '✓ Guardar vehículo completo'}
         </button>
-
       </div>
     </div>
   )
