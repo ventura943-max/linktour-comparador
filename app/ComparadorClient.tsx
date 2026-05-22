@@ -2,44 +2,70 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
-// ── ICONS ────────────────────────────────────────────────────────────────────
 const IconComparador = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="18"/><rect x="14" y="3" width="7" height="18"/></svg>
 const IconModelos = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 17H5a2 2 0 01-2-2V7l3-4h12l3 4v8a2 2 0 01-2 2z"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg>
 const IconCategorias = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h7"/></svg>
 const IconAnalisis = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+const IconLogout = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+const IconChevron = ({ collapsed }: { collapsed: boolean }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    style={{ transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .2s' }}>
+    <polyline points="15 18 9 12 15 6"/>
+  </svg>
+)
 
-// ── SIDEBAR ──────────────────────────────────────────────────────────────────
-function Sidebar({ active, setActive, mobileOpen, setMobileOpen }: any) {
+function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMobileOpen }: any) {
   const items = [
     { id: 'comparador', label: 'Comparador', icon: <IconComparador /> },
     { id: 'modelos', label: 'Modelos', icon: <IconModelos /> },
     { id: 'categorias', label: 'Categorías', icon: <IconCategorias /> },
     { id: 'analisis', label: 'Análisis comparativo', icon: <IconAnalisis /> },
   ]
+
+  const w = collapsed ? 'w-16' : 'w-56'
+
   return (
     <>
-      {/* Overlay móvil */}
       {mobileOpen && <div className="fixed inset-0 bg-black/40 z-20 md:hidden" onClick={() => setMobileOpen(false)} />}
-      <aside className={`fixed top-0 left-0 h-full w-56 bg-[#071225] z-30 flex flex-col transition-transform duration-200
+      <aside className={`fixed top-0 left-0 h-full ${w} bg-[#071225] z-30 flex flex-col transition-all duration-200
         ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
-        <div className="px-5 py-5 border-b border-white/10">
-          <div className="font-black text-xl tracking-widest text-white leading-none">LIUX</div>
-          <div className="text-[8px] tracking-[.3em] text-slate-400 mt-0.5">COMPARADOR</div>
+
+        {/* Logo */}
+        <div className={`flex items-center border-b border-white/10 h-14 ${collapsed ? 'justify-center px-0' : 'px-5 justify-between'}`}>
+          {!collapsed && (
+            <div>
+              <div className="font-black text-lg tracking-widest text-white leading-none">LIUX</div>
+              <div className="text-[8px] tracking-[.3em] text-slate-400 mt-0.5">COMPARADOR</div>
+            </div>
+          )}
+          <button onClick={() => setCollapsed(!collapsed)}
+            className="text-slate-400 hover:text-white transition p-1 rounded-lg hover:bg-white/10 hidden md:flex items-center justify-center">
+            <IconChevron collapsed={collapsed} />
+          </button>
         </div>
+
+        {/* Nav */}
         <nav className="flex-1 py-4 px-2 space-y-1">
           {items.map(item => (
             <button key={item.id} onClick={() => { setActive(item.id); setMobileOpen(false) }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition text-left
-                ${active === item.id ? 'bg-white/15 text-white' : 'text-slate-400 hover:bg-white/8 hover:text-white'}`}>
+              title={collapsed ? item.label : ''}
+              className={`w-full flex items-center gap-3 rounded-xl text-sm font-bold transition text-left
+                ${collapsed ? 'justify-center px-0 py-3' : 'px-3 py-2.5'}
+                ${active === item.id ? 'bg-white/15 text-white' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}>
               {item.icon}
-              {item.label}
+              {!collapsed && <span>{item.label}</span>}
             </button>
           ))}
         </nav>
-        <div className="px-4 py-4 border-t border-white/10">
+
+        {/* Logout */}
+        <div className={`border-t border-white/10 py-3 px-2`}>
           <button onClick={async () => { await fetch('/api/auth', { method: 'DELETE' }); window.location.href = '/admin/login' }}
-            className="w-full text-xs text-slate-500 hover:text-red-400 transition text-left px-3 py-2">
-            Cerrar sesión
+            title={collapsed ? 'Cerrar sesión' : ''}
+            className={`w-full flex items-center gap-3 text-slate-500 hover:text-red-400 transition rounded-xl py-2
+              ${collapsed ? 'justify-center px-0' : 'px-3'}`}>
+            <IconLogout />
+            {!collapsed && <span className="text-xs">Cerrar sesión</span>}
           </button>
         </div>
       </aside>
@@ -47,7 +73,6 @@ function Sidebar({ active, setActive, mobileOpen, setMobileOpen }: any) {
   )
 }
 
-// ── COMPARADOR ───────────────────────────────────────────────────────────────
 function Comparador({ models, categories, features, values }: any) {
   const [activeCat, setActiveCat] = useState('all')
   const [search, setSearch] = useState('')
@@ -107,7 +132,6 @@ function Comparador({ models, categories, features, values }: any) {
       <h1 className="text-2xl md:text-3xl font-black tracking-tight mb-1">Comparador de Modelos</h1>
       <p className="text-slate-500 text-sm mb-6">Comparativa técnica y comercial</p>
 
-      {/* CARDS */}
       <div className="overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 mb-8">
         <div className="flex gap-3 items-stretch" style={{ minWidth: 'max-content' }}>
           {selectedModels.map((m: any) => (
@@ -158,7 +182,6 @@ function Comparador({ models, categories, features, values }: any) {
         </div>
       </div>
 
-      {/* FILTERS */}
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-3 gap-2">
         <h2 className="text-xl font-black tracking-tight">Ficha completa</h2>
         <div className="flex items-center gap-2">
@@ -176,12 +199,10 @@ function Comparador({ models, categories, features, values }: any) {
         ))}
       </div>
 
-      {/* TABLE */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-x-auto">
         <table className="border-collapse text-xs" style={{ tableLayout: 'fixed', width: `${180 + selectedModels.length * 90}px`, minWidth: '100%' }}>
           <colgroup>
-            <col style={{ width: '70px' }} />
-            <col style={{ width: '110px' }} />
+            <col style={{ width: '70px' }} /><col style={{ width: '110px' }} />
             {selectedModels.map((m: any) => <col key={m.id} style={{ width: '90px' }} />)}
           </colgroup>
           <thead>
@@ -220,26 +241,20 @@ function Comparador({ models, categories, features, values }: any) {
   )
 }
 
-// ── MODELOS ──────────────────────────────────────────────────────────────────
 function Modelos() {
   const [models, setModels] = useState<any[]>([])
   const [msg, setMsg] = useState('')
-
   useEffect(() => { load() }, [])
-
   async function load() {
     const { data } = await supabase.from('models').select('*').order('sort_order')
     setModels(data || [])
   }
-
   function toast(t: string) { setMsg(t); setTimeout(() => setMsg(''), 3000) }
-
   async function deleteModel(id: string) {
     if (!confirm('¿Eliminar este modelo?')) return
     await supabase.from('models').delete().eq('id', id)
     toast('Eliminado ✓'); load()
   }
-
   return (
     <div>
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
@@ -254,15 +269,12 @@ function Modelos() {
         </div>
       </div>
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="space-y-0 divide-y divide-slate-50">
+        <div className="divide-y divide-slate-50">
           {models.map((m, idx) => (
             <div key={m.id} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50">
               <div className="flex items-center gap-4">
                 <div className="w-5 text-xs font-bold text-slate-300">{idx + 1}</div>
-                {m.img_url
-                  ? <img src={m.img_url} className="w-16 h-10 object-contain rounded-lg bg-slate-50 border border-slate-100" />
-                  : <div className="w-16 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-xs text-slate-400">Sin img</div>
-                }
+                {m.img_url ? <img src={m.img_url} className="w-16 h-10 object-contain rounded-lg bg-slate-50 border border-slate-100" /> : <div className="w-16 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-xs text-slate-400">Sin img</div>}
                 <div>
                   <div className="text-xs font-bold text-blue-600 uppercase">{m.brand}</div>
                   <div className="font-bold text-sm">{m.name} {m.version && <span className="text-slate-400 font-normal">{m.version}</span>}</div>
@@ -270,77 +282,53 @@ function Modelos() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`text-xs font-bold px-2 py-1 rounded-full ${m.is_active ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-                  {m.is_active ? 'Visible' : 'Oculto'}
-                </span>
+                <span className={`text-xs font-bold px-2 py-1 rounded-full ${m.is_active ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{m.is_active ? 'Visible' : 'Oculto'}</span>
                 <a href={`/admin/nuevo-vehiculo?id=${m.id}`} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏ Editar</a>
                 <button onClick={() => deleteModel(m.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button>
               </div>
             </div>
           ))}
-          {models.length === 0 && (
-            <div className="text-center py-12 text-slate-400">
-              <div className="text-4xl mb-3">🚗</div>
-              <div className="font-bold">Sin vehículos todavía</div>
-            </div>
-          )}
+          {models.length === 0 && <div className="text-center py-12 text-slate-400"><div className="text-4xl mb-3">🚗</div><div className="font-bold">Sin vehículos todavía</div></div>}
         </div>
       </div>
     </div>
   )
 }
 
-// ── CATEGORÍAS ───────────────────────────────────────────────────────────────
 function Categorias() {
   const [categories, setCategories] = useState<any[]>([])
   const [features, setFeatures] = useState<any[]>([])
   const [msg, setMsg] = useState('')
   const [tab, setTab] = useState('cats')
-
   const [catForm, setCatForm] = useState({ name: '', sort_order: 0 })
   const [editCatId, setEditCatId] = useState<string | null>(null)
   const [featForm, setFeatForm] = useState({ name: '', category_id: '', type: 'boolean', sort_order: 0 })
   const [editFeatId, setEditFeatId] = useState<string | null>(null)
 
   useEffect(() => { loadAll() }, [])
-
   async function loadAll() {
-    const [c, f] = await Promise.all([
-      supabase.from('categories').select('*').order('sort_order'),
-      supabase.from('features').select('*').order('sort_order'),
-    ])
-    setCategories(c.data || [])
-    setFeatures(f.data || [])
+    const [c, f] = await Promise.all([supabase.from('categories').select('*').order('sort_order'), supabase.from('features').select('*').order('sort_order')])
+    setCategories(c.data || []); setFeatures(f.data || [])
   }
-
   function toast(t: string) { setMsg(t); setTimeout(() => setMsg(''), 3000) }
 
   async function saveCat() {
     if (!catForm.name) { toast('Nombre obligatorio'); return }
-    if (editCatId) {
-      await supabase.from('categories').update(catForm).eq('id', editCatId)
-    } else {
-      await supabase.from('categories').insert(catForm)
-    }
+    if (editCatId) { await supabase.from('categories').update(catForm).eq('id', editCatId) }
+    else { await supabase.from('categories').insert(catForm) }
     toast('Guardado ✓'); setCatForm({ name: '', sort_order: 0 }); setEditCatId(null); loadAll()
   }
-
   async function deleteCat(id: string) {
     if (!confirm('¿Eliminar categoría y sus características?')) return
     await supabase.from('categories').delete().eq('id', id)
     toast('Eliminado ✓'); loadAll()
   }
-
   async function saveFeat() {
     if (!featForm.name || !featForm.category_id) { toast('Nombre y categoría obligatorios'); return }
-    if (editFeatId) {
-      await supabase.from('features').update(featForm).eq('id', editFeatId)
-    } else {
-      await supabase.from('features').insert(featForm)
-    }
+    if (editFeatId) { await supabase.from('features').update(featForm).eq('id', editFeatId) }
+    else { await supabase.from('features').insert(featForm) }
     toast('Guardado ✓'); setFeatForm({ name: '', category_id: '', type: 'boolean', sort_order: 0 }); setEditFeatId(null); loadAll()
   }
-
   async function deleteFeat(id: string) {
     if (!confirm('¿Eliminar esta característica?')) return
     await supabase.from('features').delete().eq('id', id)
@@ -355,12 +343,10 @@ function Categorias() {
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
       <h1 className="text-2xl font-black tracking-tight mb-1">Categorías</h1>
       <p className="text-slate-500 text-sm mb-6">Gestiona categorías y características del comparador</p>
-
       <div className="flex gap-2 mb-6">
         <button onClick={() => setTab('cats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'cats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>Categorías</button>
         <button onClick={() => setTab('feats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'feats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>Características</button>
       </div>
-
       {tab === 'cats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
@@ -388,7 +374,6 @@ function Categorias() {
           </div>
         </div>
       )}
-
       {tab === 'feats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
@@ -442,23 +427,22 @@ function Categorias() {
   )
 }
 
-// ── MAIN ─────────────────────────────────────────────────────────────────────
 export default function ComparadorClient({ models, categories, features, values }: any) {
   const [active, setActive] = useState('comparador')
+  const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  const ml = collapsed ? 'md:ml-16' : 'md:ml-56'
 
   return (
     <div className="flex min-h-screen bg-[#f3f6fa]">
-      <Sidebar active={active} setActive={setActive} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
-
-      <div className="flex-1 md:ml-56 min-h-screen flex flex-col">
-        {/* Mobile topbar */}
+      <Sidebar active={active} setActive={setActive} collapsed={collapsed} setCollapsed={setCollapsed} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+      <div className={`flex-1 ${ml} min-h-screen flex flex-col transition-all duration-200`}>
         <div className="md:hidden flex items-center justify-between bg-[#071225] text-white px-4 h-14 sticky top-0 z-10">
           <button onClick={() => setMobileOpen(true)} className="text-xl text-slate-300">☰</button>
           <div className="font-black text-lg tracking-widest">LIUX</div>
           <div className="w-8" />
         </div>
-
         <main className="flex-1 p-4 md:p-8">
           {active === 'comparador' && <Comparador models={models} categories={categories} features={features} values={values} />}
           {active === 'modelos' && <Modelos />}
