@@ -7,6 +7,7 @@ const IconComparador = () => <svg width="18" height="18" viewBox="0 0 24 24" fil
 const IconModelos = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 17H5a2 2 0 01-2-2V7l3-4h12l3 4v8a2 2 0 01-2 2z"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg>
 const IconCategorias = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h7"/></svg>
 const IconAnalisis = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+const IconConfig = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
 const IconLogout = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
 const IconChevron = ({ collapsed }: { collapsed: boolean }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -33,6 +34,7 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
     { id: 'modelos', label: t.modelos, icon: <IconModelos /> },
     { id: 'categorias', label: t.categorias, icon: <IconCategorias /> },
     { id: 'analisis', label: t.analisis, icon: <IconAnalisis /> },
+    { id: 'config', label: 'Configuración', icon: <IconConfig /> },
   ]
   const w = collapsed ? 'w-16' : 'w-56'
   return (
@@ -86,7 +88,7 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
   )
 }
 
-function Comparador({ models, categories, features, values, t, lang }: any) {
+function Comparador({ models, categories, features, values, t, lang, cardFields }: any) {
   const [activeCat, setActiveCat] = useState('all')
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>(models.slice(0, 3).map((m: any) => m.id))
@@ -121,14 +123,9 @@ function Comparador({ models, categories, features, values, t, lang }: any) {
     groups[key].push(m)
   })
 
-  const specRows = [
-    [t.rangeWmtc, 'Driving Mileage under WMTC mode (km)'],
-    [t.maxSpeed, 'Maximum speed (km/h)'],
-    [t.battery, 'Battery capacity (kWh)'],
-    [t.peakPower, 'Motor peak power (kW)'],
-    [t.torque, 'Motor torque (Nm)'],
-    [t.charge, 'AC charging time 0-100% (h)'],
-  ]
+  const activeCardFields = cardFields
+    .filter((f: any) => f.enabled)
+    .sort((a: any, b: any) => a.order - b.order)
 
   const filteredFeatures = categories.flatMap((cat: any) => {
     const feats = features.filter((f: any) => {
@@ -157,10 +154,10 @@ function Comparador({ models, categories, features, values, t, lang }: any) {
               <div className="h-20 flex items-center justify-center overflow-hidden mb-2 bg-slate-50 rounded-xl">
                 {m.img_url ? <img src={m.img_url} alt={m.name} className="max-h-20 max-w-full object-contain" /> : <span className="text-xs text-slate-400">{t.sinImagen}</span>}
               </div>
-              {specRows.map(([label, featName]) => (
-                <div key={label} className="flex justify-between border-t border-slate-100 pt-1 gap-1">
-                  <span className="text-[9px] text-slate-500 truncate">{label}</span>
-                  <span className="text-[9px] font-black text-slate-900 shrink-0">{specVal(featName, m.id)}</span>
+              {activeCardFields.map((field: any) => (
+                <div key={field.feature_name} className="flex justify-between border-t border-slate-100 pt-1 gap-1">
+                  <span className="text-[9px] text-slate-500 truncate">{field.label}</span>
+                  <span className="text-[9px] font-black text-slate-900 shrink-0">{specVal(field.feature_name, m.id)}</span>
                 </div>
               ))}
             </div>
@@ -448,9 +445,7 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
 
   async function generate() {
     if (!model1 || !model2) return
-    setLoading(true)
-    setAnalysis('')
-    setError('')
+    setLoading(true); setAnalysis(''); setError('')
     try {
       const res = await fetch('/api/analisis', {
         method: 'POST',
@@ -460,9 +455,7 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
       const data = await res.json()
       if (data.error) throw new Error(data.error)
       setAnalysis(data.analysis)
-    } catch (e: any) {
-      setError(e.message)
-    }
+    } catch (e: any) { setError(e.message) }
     setLoading(false)
   }
 
@@ -479,7 +472,6 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
     <div>
       <h1 className="text-2xl font-black tracking-tight mb-1">{t.analisis}</h1>
       <p className="text-slate-500 text-sm mb-6">Selecciona dos vehículos para generar un análisis comparativo con IA</p>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         {[
           { label: 'Vehículo 1', value: model1Id, set: setModel1Id, other: model2Id },
@@ -497,7 +489,6 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
           </div>
         ))}
       </div>
-
       {model1 && model2 && (
         <div className="grid grid-cols-2 gap-4 mb-6">
           {[model1, model2].map((m: any) => (
@@ -514,7 +505,6 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
           ))}
         </div>
       )}
-
       <button onClick={generate} disabled={!model1 || !model2 || loading}
         className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-40 text-sm mb-6 flex items-center justify-center gap-2">
         {loading ? (
@@ -526,9 +516,7 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
           </>
         ) : '✦ Generar análisis con IA'}
       </button>
-
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">{error}</div>}
-
       {analysis && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8">
           <div className="flex items-center justify-between mb-4">
@@ -537,12 +525,138 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Análisis generado por IA</span>
             </div>
             <button onClick={() => navigator.clipboard.writeText(analysis)}
-              className="text-xs text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg px-3 py-1">
-              📋 Copiar
-            </button>
+              className="text-xs text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg px-3 py-1">📋 Copiar</button>
           </div>
           <div dangerouslySetInnerHTML={{ __html: renderMarkdown(analysis) }} />
         </div>
+      )}
+    </div>
+  )
+}
+
+function Configuracion({ features }: { features: any[] }) {
+  const [fields, setFields] = useState<any[]>([])
+  const [msg, setMsg] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [showAdd, setShowAdd] = useState(false)
+  const [newField, setNewField] = useState({ feature_name: '', label: '' })
+  const dragIdx = useRef<number | null>(null)
+
+  useEffect(() => { loadFields() }, [])
+
+  async function loadFields() {
+    const { data } = await supabase.from('settings').select('*').eq('id', 'card_fields').single()
+    if (data) setFields(data.value)
+  }
+
+  function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 3000) }
+
+  async function save(updated: any[]) {
+    setLoading(true)
+    await supabase.from('settings').upsert({ id: 'card_fields', value: updated })
+    setFields(updated)
+    toast('Guardado ✓')
+    setLoading(false)
+  }
+
+  function toggleField(idx: number) {
+    const updated = fields.map((f, i) => i === idx ? { ...f, enabled: !f.enabled } : f)
+    save(updated)
+  }
+
+  function updateLabel(idx: number, label: string) {
+    setFields(fields.map((f, i) => i === idx ? { ...f, label } : f))
+  }
+
+  function saveLabel(idx: number) {
+    save(fields)
+  }
+
+  function removeField(idx: number) {
+    save(fields.filter((_, i) => i !== idx))
+  }
+
+  function addField() {
+    if (!newField.feature_name || !newField.label) return
+    const updated = [...fields, { ...newField, enabled: true, order: fields.length + 1 }]
+    save(updated)
+    setNewField({ feature_name: '', label: '' })
+    setShowAdd(false)
+  }
+
+  function onDragStart(idx: number) { dragIdx.current = idx }
+  function onDragOver(e: React.DragEvent, idx: number) {
+    e.preventDefault()
+    if (dragIdx.current === null || dragIdx.current === idx) return
+    const updated = [...fields]
+    const [moved] = updated.splice(dragIdx.current, 1)
+    updated.splice(idx, 0, moved)
+    dragIdx.current = idx
+    setFields(updated.map((f, i) => ({ ...f, order: i + 1 })))
+  }
+  function onDragEnd() { save(fields); dragIdx.current = null }
+
+  const ic = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
+
+  return (
+    <div>
+      {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
+      <h1 className="text-2xl font-black tracking-tight mb-1">Configuración</h1>
+      <p className="text-slate-500 text-sm mb-6">Personaliza los campos que se muestran en las tarjetas del comparador</p>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mb-4">
+        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+          <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Campos de las tarjetas</span>
+          <span className="text-xs text-slate-400">Arrastra para reordenar</span>
+        </div>
+        <div className="divide-y divide-slate-50">
+          {fields.map((field, idx) => (
+            <div key={idx} draggable onDragStart={() => onDragStart(idx)} onDragOver={e => onDragOver(e, idx)} onDragEnd={onDragEnd}
+              className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 cursor-grab active:cursor-grabbing">
+              <div className="text-slate-300 text-lg select-none">⠿</div>
+              <div className="w-5 text-xs font-bold text-slate-300">{idx + 1}</div>
+              <input className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400"
+                value={field.label} onChange={e => updateLabel(idx, e.target.value)}
+                onBlur={() => saveLabel(idx)} />
+              <div className="text-xs text-slate-400 truncate max-w-[200px] hidden md:block">{field.feature_name}</div>
+              <button onClick={() => toggleField(idx)}
+                className={`px-3 py-1 text-xs font-bold rounded-full transition ${field.enabled ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                {field.enabled ? 'Visible' : 'Oculto'}
+              </button>
+              <button onClick={() => removeField(idx)} className="text-slate-300 hover:text-red-400 transition text-sm">🗑</button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {showAdd ? (
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 mb-4">
+          <h3 className="font-black text-sm mb-4 text-slate-700 uppercase tracking-wider">Añadir campo</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Característica</label>
+              <select className={ic} value={newField.feature_name} onChange={e => setNewField({ ...newField, feature_name: e.target.value })}>
+                <option value="">Selecciona...</option>
+                {features.filter(f => !fields.find(cf => cf.feature_name === f.name)).map(f => (
+                  <option key={f.id} value={f.name}>{f.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Etiqueta corta</label>
+              <input className={ic} value={newField.label} onChange={e => setNewField({ ...newField, label: e.target.value })} placeholder="ej. Autonomía" />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-500">Cancelar</button>
+            <button onClick={addField} disabled={!newField.feature_name || !newField.label}
+              className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg disabled:opacity-40">Añadir</button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setShowAdd(true)} className="w-full border-2 border-dashed border-slate-200 rounded-2xl py-4 text-sm font-bold text-slate-400 hover:border-blue-300 hover:text-blue-500 hover:bg-blue-50 transition">
+          + Añadir campo
+        </button>
       )}
     </div>
   )
@@ -553,6 +667,29 @@ export default function ComparadorClient({ models, categories, features, values 
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [lang, setLang] = useState<Lang>('es')
+  const [cardFields, setCardFields] = useState<any[]>([
+    { feature_name: 'Driving Mileage under WMTC mode (km)', label: 'Autonomía WMTC', enabled: true, order: 1 },
+    { feature_name: 'Maximum speed (km/h)', label: 'Vel. máxima', enabled: true, order: 2 },
+    { feature_name: 'Battery capacity (kWh)', label: 'Batería', enabled: true, order: 3 },
+    { feature_name: 'Motor peak power (kW)', label: 'Potencia pico', enabled: true, order: 4 },
+    { feature_name: 'Motor torque (Nm)', label: 'Torque', enabled: true, order: 5 },
+    { feature_name: 'AC charging time 0-100% (h)', label: 'Carga 0-100%', enabled: true, order: 6 },
+  ])
+
+  useEffect(() => {
+    supabase.from('settings').select('*').eq('id', 'card_fields').single().then(({ data }) => {
+      if (data) setCardFields(data.value)
+    })
+  }, [])
+
+  // Reload card fields when switching to comparador
+  useEffect(() => {
+    if (active === 'comparador') {
+      supabase.from('settings').select('*').eq('id', 'card_fields').single().then(({ data }) => {
+        if (data) setCardFields(data.value)
+      })
+    }
+  }, [active])
 
   const t = translations[lang]
   const ml = collapsed ? 'md:ml-16' : 'md:ml-56'
@@ -568,10 +705,11 @@ export default function ComparadorClient({ models, categories, features, values 
           <div className="w-8" />
         </div>
         <main className="flex-1 p-4 md:p-8">
-          {active === 'comparador' && <Comparador models={models} categories={categories} features={features} values={values} t={t} lang={lang} />}
+          {active === 'comparador' && <Comparador models={models} categories={categories} features={features} values={values} t={t} lang={lang} cardFields={cardFields} />}
           {active === 'modelos' && <Modelos t={t} />}
           {active === 'categorias' && <Categorias t={t} />}
           {active === 'analisis' && <Analisis models={models} categories={categories} features={features} values={values} t={t} lang={lang} />}
+          {active === 'config' && <Configuracion features={features} />}
         </main>
       </div>
     </div>
