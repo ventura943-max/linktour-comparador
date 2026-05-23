@@ -146,7 +146,6 @@ function Comparador({ models, categories, features, values, t, lang }: any) {
     <div>
       <h1 className="text-2xl md:text-3xl font-black tracking-tight mb-1">{t.comparadorTitle}</h1>
       <p className="text-slate-500 text-sm mb-6">{t.comparadorSubtitle}</p>
-
       <div className="overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 mb-8">
         <div className="flex gap-3 items-stretch" style={{ minWidth: 'max-content' }}>
           {selectedModels.map((m: any) => (
@@ -196,7 +195,6 @@ function Comparador({ models, categories, features, values, t, lang }: any) {
           )}
         </div>
       </div>
-
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-3 gap-2">
         <h2 className="text-xl font-black tracking-tight">{t.fichaCompleta}</h2>
         <div className="flex items-center gap-2">
@@ -205,7 +203,6 @@ function Comparador({ models, categories, features, values, t, lang }: any) {
           <span className="text-xs text-slate-400 whitespace-nowrap">{filteredFeatures.length} {t.espec}</span>
         </div>
       </div>
-
       <div className="flex gap-2 flex-wrap mb-4">
         {[{ id: 'all', name: t.todo }, ...categories.map((c: any) => ({ ...c, name: getName(c, lang) }))].map((c: any) => (
           <button key={c.id} onClick={() => setActiveCat(c.id)}
@@ -214,7 +211,6 @@ function Comparador({ models, categories, features, values, t, lang }: any) {
           </button>
         ))}
       </div>
-
       <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-x-auto">
         <table className="border-collapse text-xs" style={{ tableLayout: 'fixed', width: `${180 + selectedModels.length * 90}px`, minWidth: '100%' }}>
           <colgroup>
@@ -327,7 +323,6 @@ function Categorias({ t }: { t: T }) {
     setCategories(c.data || []); setFeatures(f.data || [])
   }
   function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 3000) }
-
   async function saveCat() {
     if (!catForm.name) { toast(t.nombreObligatorio); return }
     if (editCatId) await supabase.from('categories').update(catForm).eq('id', editCatId)
@@ -350,10 +345,8 @@ function Categorias({ t }: { t: T }) {
     await supabase.from('features').delete().eq('id', id)
     toast(t.eliminado); loadAll()
   }
-
   const ic = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
   const lc = "block text-xs font-bold text-slate-500 uppercase mb-1"
-
   return (
     <div>
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
@@ -443,6 +436,118 @@ function Categorias({ t }: { t: T }) {
   )
 }
 
+function Analisis({ models, categories, features, values, t, lang }: any) {
+  const [model1Id, setModel1Id] = useState('')
+  const [model2Id, setModel2Id] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [analysis, setAnalysis] = useState('')
+  const [error, setError] = useState('')
+
+  const model1 = models.find((m: any) => m.id === model1Id)
+  const model2 = models.find((m: any) => m.id === model2Id)
+
+  async function generate() {
+    if (!model1 || !model2) return
+    setLoading(true)
+    setAnalysis('')
+    setError('')
+    try {
+      const res = await fetch('/api/analisis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model1, model2, features, values, categories, lang })
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setAnalysis(data.analysis)
+    } catch (e: any) {
+      setError(e.message)
+    }
+    setLoading(false)
+  }
+
+  function renderMarkdown(text: string) {
+    return text
+      .replace(/^## (.+)$/gm, '<h2 class="text-lg font-black text-slate-800 mt-6 mb-2 pb-1 border-b border-slate-200">$1</h2>')
+      .replace(/^### (.+)$/gm, '<h3 class="text-sm font-black text-blue-600 uppercase tracking-wider mt-4 mb-1">$1</h3>')
+      .replace(/^- (.+)$/gm, '<li class="text-sm text-slate-700 ml-4 mb-1">• $1</li>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/^(?!<[h|l])(.+)$/gm, '<p class="text-sm text-slate-700 mb-2">$1</p>')
+  }
+
+  return (
+    <div>
+      <h1 className="text-2xl font-black tracking-tight mb-1">{t.analisis}</h1>
+      <p className="text-slate-500 text-sm mb-6">Selecciona dos vehículos para generar un análisis comparativo con IA</p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        {[
+          { label: 'Vehículo 1', value: model1Id, set: setModel1Id, other: model2Id },
+          { label: 'Vehículo 2', value: model2Id, set: setModel2Id, other: model1Id },
+        ].map(({ label, value, set, other }) => (
+          <div key={label}>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">{label}</label>
+            <select value={value} onChange={e => set(e.target.value)}
+              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-400 bg-white">
+              <option value="">Selecciona un vehículo...</option>
+              {models.filter((m: any) => m.id !== other).map((m: any) => (
+                <option key={m.id} value={m.id}>{m.brand} {m.name} {m.version}</option>
+              ))}
+            </select>
+          </div>
+        ))}
+      </div>
+
+      {model1 && model2 && (
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          {[model1, model2].map((m: any) => (
+            <div key={m.id} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center gap-4 shadow-sm">
+              <div className="w-20 h-14 bg-slate-50 rounded-xl overflow-hidden shrink-0 flex items-center justify-center">
+                {m.img_url ? <img src={m.img_url} className="max-w-full max-h-full object-contain" /> : <span className="text-xs text-slate-400">Sin img</span>}
+              </div>
+              <div>
+                <div className="text-xs font-bold text-blue-600 uppercase">{m.brand}</div>
+                <div className="font-black text-base">{m.name} {m.version}</div>
+                <div className="text-xs text-slate-400">{m.price}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button onClick={generate} disabled={!model1 || !model2 || loading}
+        className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-40 text-sm mb-6 flex items-center justify-center gap-2">
+        {loading ? (
+          <>
+            <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/>
+            </svg>
+            Generando análisis...
+          </>
+        ) : '✦ Generar análisis con IA'}
+      </button>
+
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">{error}</div>}
+
+      {analysis && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Análisis generado por IA</span>
+            </div>
+            <button onClick={() => navigator.clipboard.writeText(analysis)}
+              className="text-xs text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg px-3 py-1">
+              📋 Copiar
+            </button>
+          </div>
+          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(analysis) }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ComparadorClient({ models, categories, features, values }: any) {
   const [active, setActive] = useState('comparador')
   const [collapsed, setCollapsed] = useState(false)
@@ -466,14 +571,7 @@ export default function ComparadorClient({ models, categories, features, values 
           {active === 'comparador' && <Comparador models={models} categories={categories} features={features} values={values} t={t} lang={lang} />}
           {active === 'modelos' && <Modelos t={t} />}
           {active === 'categorias' && <Categorias t={t} />}
-          {active === 'analisis' && (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-              <div className="text-6xl mb-4">📊</div>
-              <h1 className="text-2xl font-black tracking-tight mb-2">{t.analisis}</h1>
-              <div className="inline-block bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2 rounded-full text-sm font-bold">{t.enConstruccion}</div>
-              <p className="text-slate-400 text-sm mt-3">{t.proximamente}</p>
-            </div>
-          )}
+          {active === 'analisis' && <Analisis models={models} categories={categories} features={features} values={values} t={t} lang={lang} />}
         </main>
       </div>
     </div>
