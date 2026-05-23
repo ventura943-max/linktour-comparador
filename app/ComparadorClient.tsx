@@ -441,18 +441,16 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
   const [analysis, setAnalysis] = useState('')
   const [error, setError] = useState('')
 
-  // Get segment feature
   const segmentFeat = features.find((f: any) => f.name === 'Segment')
 
-  // Get all available segments from values
-  const segments = segmentFeat
-    ? [...new Set(values
-        .filter((v: any) => v.feature_id === segmentFeat.id && v.value)
-        .map((v: any) => v.value as string)
-      )].sort()
+  const segments: string[] = segmentFeat
+    ? Array.from(new Set<string>(
+        values
+          .filter((v: any) => v.feature_id === segmentFeat.id && v.value)
+          .map((v: any) => String(v.value))
+      )).sort()
     : []
 
-  // Filter models by selected segment
   const modelsInSegment = segment && segmentFeat
     ? models.filter((m: any) =>
         values.find((v: any) => v.feature_id === segmentFeat.id && v.model_id === m.id && v.value === segment)
@@ -462,7 +460,6 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
   const model1 = modelsInSegment.find((m: any) => m.id === model1Id)
   const model2 = modelsInSegment.find((m: any) => m.id === model2Id)
 
-  // Reset vehicle selection when segment changes
   useEffect(() => {
     setModel1Id('')
     setModel2Id('')
@@ -500,7 +497,6 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
       <h1 className="text-2xl font-black tracking-tight mb-1">{t.analisis}</h1>
       <p className="text-slate-500 text-sm mb-6">Selecciona un segmento y dos vehículos para generar un análisis comparativo con IA</p>
 
-      {/* SEGMENT SELECTOR */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-6 shadow-sm">
         <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-3">Segmento</label>
         <div className="flex gap-3 flex-wrap">
@@ -508,19 +504,16 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
             className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${!segment ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
             Todos
           </button>
-          {segments.map((seg: string) => (
+          {segments.map((seg) => (
             <button key={seg} onClick={() => setSegment(seg)}
               className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${segment === seg ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
               {seg}
             </button>
           ))}
         </div>
-        {segment && (
-          <p className="text-xs text-slate-400 mt-2">{modelsInSegment.length} vehículos en el segmento {segment}</p>
-        )}
+        {segment && <p className="text-xs text-slate-400 mt-2">{modelsInSegment.length} vehículos en el segmento {segment}</p>}
       </div>
 
-      {/* VEHICLE SELECTORS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         {[
           { label: 'Vehículo 1', value: model1Id, set: setModel1Id, other: model2Id },
@@ -539,7 +532,6 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
         ))}
       </div>
 
-      {/* VEHICLE PREVIEW CARDS */}
       {model1 && model2 && (
         <div className="grid grid-cols-2 gap-4 mb-6">
           {[model1, model2].map((m: any) => (
@@ -557,7 +549,6 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
         </div>
       )}
 
-      {/* GENERATE BUTTON */}
       <button onClick={generate} disabled={!model1 || !model2 || loading}
         className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-40 text-sm mb-6 flex items-center justify-center gap-2">
         {loading ? (
@@ -592,7 +583,6 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
 function Configuracion({ features }: { features: any[] }) {
   const [fields, setFields] = useState<any[]>([])
   const [msg, setMsg] = useState('')
-  const [loading, setLoading] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [newField, setNewField] = useState({ feature_name: '', label: '' })
   const dragIdx = useRef<number | null>(null)
@@ -607,30 +597,19 @@ function Configuracion({ features }: { features: any[] }) {
   function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 3000) }
 
   async function save(updated: any[]) {
-    setLoading(true)
     await supabase.from('settings').upsert({ id: 'card_fields', value: updated })
     setFields(updated)
     toast('Guardado ✓')
-    setLoading(false)
   }
 
-  function toggleField(idx: number) {
-    const updated = fields.map((f, i) => i === idx ? { ...f, enabled: !f.enabled } : f)
-    save(updated)
-  }
-
-  function updateLabel(idx: number, label: string) {
-    setFields(fields.map((f, i) => i === idx ? { ...f, label } : f))
-  }
-
-  function saveLabel(idx: number) { save(fields) }
-
+  function toggleField(idx: number) { save(fields.map((f, i) => i === idx ? { ...f, enabled: !f.enabled } : f)) }
+  function updateLabel(idx: number, label: string) { setFields(fields.map((f, i) => i === idx ? { ...f, label } : f)) }
+  function saveLabel() { save(fields) }
   function removeField(idx: number) { save(fields.filter((_, i) => i !== idx)) }
 
   function addField() {
     if (!newField.feature_name || !newField.label) return
-    const updated = [...fields, { ...newField, enabled: true, order: fields.length + 1 }]
-    save(updated)
+    save([...fields, { ...newField, enabled: true, order: fields.length + 1 }])
     setNewField({ feature_name: '', label: '' })
     setShowAdd(false)
   }
@@ -666,7 +645,7 @@ function Configuracion({ features }: { features: any[] }) {
               <div className="text-slate-300 text-lg select-none">⠿</div>
               <div className="w-5 text-xs font-bold text-slate-300">{idx + 1}</div>
               <input className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400"
-                value={field.label} onChange={e => updateLabel(idx, e.target.value)} onBlur={() => saveLabel(idx)} />
+                value={field.label} onChange={e => updateLabel(idx, e.target.value)} onBlur={saveLabel} />
               <div className="text-xs text-slate-400 truncate max-w-[200px] hidden md:block">{field.feature_name}</div>
               <button onClick={() => toggleField(idx)}
                 className={`px-3 py-1 text-xs font-bold rounded-full transition ${field.enabled ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
