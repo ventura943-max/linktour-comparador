@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
 
 Analiza y compara estos dos vehículos eléctricos en detalle. Responde en ${langLabels[lang] || 'español'}.
 Usa toda la información disponible incluyendo las notas adicionales y las imágenes para enriquecer el análisis.
-Si hay imágenes disponibles, analiza el diseño exterior, acabados, habitabilidad aparente y atractivo visual.
+Analiza en detalle el diseño exterior e interior de cada vehículo basándote en las imágenes proporcionadas.
 
 === VEHÍCULO 1 ===
 ${specs1}
@@ -56,8 +56,11 @@ Genera un informe comparativo estructurado con estas secciones exactas en format
 ## Análisis comercial
 (Compara precio, equipamiento, relación calidad-precio, público objetivo, posicionamiento de marca)
 
-## Análisis de diseño
-(Basándote en las imágenes disponibles, analiza el diseño exterior, estética, modernidad y atractivo visual de cada vehículo)
+## Análisis de diseño exterior
+(Basándote en las imágenes, analiza líneas de diseño, estética, modernidad, distintividad y atractivo visual exterior de cada vehículo)
+
+## Análisis de diseño interior
+(Basándote en las imágenes, analiza habitabilidad aparente, acabados, ergonomía, tecnología visible e imagen interior de cada vehículo)
 
 ## Puntos fuertes
 ### ${model1.brand} ${model1.name} ${model1.version || ''}
@@ -88,16 +91,17 @@ Genera un informe comparativo estructurado con estas secciones exactas en format
 ## Veredicto final
 (Una conclusión clara y directa de máximo 2 frases)`
 
-  // Build image content from galleries and main images
+  // Recopilar imágenes — hasta 5 por vehículo (principal + 4 galería) = 10 total
   const imageUrls: string[] = []
   for (const model of [model1, model2]) {
     if (model.img_url) imageUrls.push(model.img_url)
-    if (model.gallery?.length) imageUrls.push(...model.gallery.slice(0, 3))
+    if (model.gallery?.length) {
+      imageUrls.push(...model.gallery.slice(0, 4))
+    }
   }
 
-  // Build message content
   const content: any[] = [{ type: 'text', text: prompt }]
-  for (const url of imageUrls.slice(0, 8)) {
+  for (const url of imageUrls.slice(0, 10)) {
     content.push({
       type: 'image_url',
       image_url: { url, detail: 'low' }
@@ -114,7 +118,7 @@ Genera un informe comparativo estructurado con estas secciones exactas en format
       body: JSON.stringify({
         model: 'gpt-4o',
         messages: [{ role: 'user', content }],
-        max_tokens: 2500,
+        max_tokens: 3000,
         temperature: 0.7
       })
     })
