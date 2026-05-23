@@ -434,14 +434,41 @@ function Categorias({ t }: { t: T }) {
 }
 
 function Analisis({ models, categories, features, values, t, lang }: any) {
+  const [segment, setSegment] = useState('')
   const [model1Id, setModel1Id] = useState('')
   const [model2Id, setModel2Id] = useState('')
   const [loading, setLoading] = useState(false)
   const [analysis, setAnalysis] = useState('')
   const [error, setError] = useState('')
 
-  const model1 = models.find((m: any) => m.id === model1Id)
-  const model2 = models.find((m: any) => m.id === model2Id)
+  // Get segment feature
+  const segmentFeat = features.find((f: any) => f.name === 'Segment')
+
+  // Get all available segments from values
+  const segments = segmentFeat
+    ? [...new Set(values
+        .filter((v: any) => v.feature_id === segmentFeat.id && v.value)
+        .map((v: any) => v.value as string)
+      )].sort()
+    : []
+
+  // Filter models by selected segment
+  const modelsInSegment = segment && segmentFeat
+    ? models.filter((m: any) =>
+        values.find((v: any) => v.feature_id === segmentFeat.id && v.model_id === m.id && v.value === segment)
+      )
+    : models
+
+  const model1 = modelsInSegment.find((m: any) => m.id === model1Id)
+  const model2 = modelsInSegment.find((m: any) => m.id === model2Id)
+
+  // Reset vehicle selection when segment changes
+  useEffect(() => {
+    setModel1Id('')
+    setModel2Id('')
+    setAnalysis('')
+    setError('')
+  }, [segment])
 
   async function generate() {
     if (!model1 || !model2) return
@@ -471,7 +498,29 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
   return (
     <div>
       <h1 className="text-2xl font-black tracking-tight mb-1">{t.analisis}</h1>
-      <p className="text-slate-500 text-sm mb-6">Selecciona dos vehículos para generar un análisis comparativo con IA</p>
+      <p className="text-slate-500 text-sm mb-6">Selecciona un segmento y dos vehículos para generar un análisis comparativo con IA</p>
+
+      {/* SEGMENT SELECTOR */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-6 shadow-sm">
+        <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-3">Segmento</label>
+        <div className="flex gap-3 flex-wrap">
+          <button onClick={() => setSegment('')}
+            className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${!segment ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
+            Todos
+          </button>
+          {segments.map((seg: string) => (
+            <button key={seg} onClick={() => setSegment(seg)}
+              className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${segment === seg ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
+              {seg}
+            </button>
+          ))}
+        </div>
+        {segment && (
+          <p className="text-xs text-slate-400 mt-2">{modelsInSegment.length} vehículos en el segmento {segment}</p>
+        )}
+      </div>
+
+      {/* VEHICLE SELECTORS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         {[
           { label: 'Vehículo 1', value: model1Id, set: setModel1Id, other: model2Id },
@@ -482,13 +531,15 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
             <select value={value} onChange={e => set(e.target.value)}
               className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-400 bg-white">
               <option value="">Selecciona un vehículo...</option>
-              {models.filter((m: any) => m.id !== other).map((m: any) => (
+              {modelsInSegment.filter((m: any) => m.id !== other).map((m: any) => (
                 <option key={m.id} value={m.id}>{m.brand} {m.name} {m.version}</option>
               ))}
             </select>
           </div>
         ))}
       </div>
+
+      {/* VEHICLE PREVIEW CARDS */}
       {model1 && model2 && (
         <div className="grid grid-cols-2 gap-4 mb-6">
           {[model1, model2].map((m: any) => (
@@ -505,6 +556,8 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
           ))}
         </div>
       )}
+
+      {/* GENERATE BUTTON */}
       <button onClick={generate} disabled={!model1 || !model2 || loading}
         className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-40 text-sm mb-6 flex items-center justify-center gap-2">
         {loading ? (
@@ -516,7 +569,9 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
           </>
         ) : '✦ Generar análisis con IA'}
       </button>
+
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">{error}</div>}
+
       {analysis && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8">
           <div className="flex items-center justify-between mb-4">
@@ -568,13 +623,9 @@ function Configuracion({ features }: { features: any[] }) {
     setFields(fields.map((f, i) => i === idx ? { ...f, label } : f))
   }
 
-  function saveLabel(idx: number) {
-    save(fields)
-  }
+  function saveLabel(idx: number) { save(fields) }
 
-  function removeField(idx: number) {
-    save(fields.filter((_, i) => i !== idx))
-  }
+  function removeField(idx: number) { save(fields.filter((_, i) => i !== idx)) }
 
   function addField() {
     if (!newField.feature_name || !newField.label) return
@@ -603,7 +654,6 @@ function Configuracion({ features }: { features: any[] }) {
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
       <h1 className="text-2xl font-black tracking-tight mb-1">Configuración</h1>
       <p className="text-slate-500 text-sm mb-6">Personaliza los campos que se muestran en las tarjetas del comparador</p>
-
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mb-4">
         <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
           <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Campos de las tarjetas</span>
@@ -616,8 +666,7 @@ function Configuracion({ features }: { features: any[] }) {
               <div className="text-slate-300 text-lg select-none">⠿</div>
               <div className="w-5 text-xs font-bold text-slate-300">{idx + 1}</div>
               <input className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400"
-                value={field.label} onChange={e => updateLabel(idx, e.target.value)}
-                onBlur={() => saveLabel(idx)} />
+                value={field.label} onChange={e => updateLabel(idx, e.target.value)} onBlur={() => saveLabel(idx)} />
               <div className="text-xs text-slate-400 truncate max-w-[200px] hidden md:block">{field.feature_name}</div>
               <button onClick={() => toggleField(idx)}
                 className={`px-3 py-1 text-xs font-bold rounded-full transition ${field.enabled ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
@@ -628,7 +677,6 @@ function Configuracion({ features }: { features: any[] }) {
           ))}
         </div>
       </div>
-
       {showAdd ? (
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 mb-4">
           <h3 className="font-black text-sm mb-4 text-slate-700 uppercase tracking-wider">Añadir campo</h3>
@@ -682,7 +730,6 @@ export default function ComparadorClient({ models, categories, features, values 
     })
   }, [])
 
-  // Reload card fields when switching to comparador
   useEffect(() => {
     if (active === 'comparador') {
       supabase.from('settings').select('*').eq('id', 'card_fields').single().then(({ data }) => {
