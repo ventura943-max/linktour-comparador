@@ -116,13 +116,6 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
     return val(f.id, modelId)
   }
 
-  const groups: Record<string, any[]> = {}
-  selectedModels.forEach((m: any) => {
-    const key = m.brand + ' ' + m.name
-    if (!groups[key]) groups[key] = []
-    groups[key].push(m)
-  })
-
   const activeCardFields = cardFields
     .filter((f: any) => f.enabled)
     .sort((a: any, b: any) => a.order - b.order)
@@ -215,17 +208,32 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
             {selectedModels.map((m: any) => <col key={m.id} style={{ width: '90px' }} />)}
           </colgroup>
           <thead>
+            {/* FILA 1: MARCA */}
             <tr>
               <th colSpan={2} className="bg-[#081224]"></th>
-              {Object.entries(groups).map(([key, ms]: any) => (
-                <th key={key} colSpan={ms.length} className="bg-[#14243a] text-[#a8c4e8] text-center py-2 text-[9px] font-black tracking-wider uppercase border border-[#1a2f4a]">{key}</th>
+              {selectedModels.map((m: any) => (
+                <th key={m.id} className="bg-[#0d1e3a] text-[#7aa4cc] text-center py-1.5 text-[8px] font-black tracking-widest uppercase border border-[#1a2f4a]">
+                  {m.brand}
+                </th>
               ))}
             </tr>
+            {/* FILA 2: MODELO */}
+            <tr>
+              <th colSpan={2} className="bg-[#081224]"></th>
+              {selectedModels.map((m: any) => (
+                <th key={m.id} className="bg-[#14243a] text-[#a8c4e8] text-center py-1.5 text-[8px] font-black tracking-wider uppercase border border-[#1a2f4a]">
+                  {m.name}
+                </th>
+              ))}
+            </tr>
+            {/* FILA 3: VERSION */}
             <tr>
               <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px]">{t.cat}</th>
               <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px]">{t.caracteristica}</th>
               {selectedModels.map((m: any) => (
-                <th key={m.id} className="bg-[#081224] text-white text-center px-1 py-2 font-black text-[8px]">{m.version || m.name}</th>
+                <th key={m.id} className="bg-[#1c3050] text-white text-center px-1 py-2 font-black text-[8px] border border-[#1a2f4a]">
+                  {m.version || m.name}
+                </th>
               ))}
             </tr>
           </thead>
