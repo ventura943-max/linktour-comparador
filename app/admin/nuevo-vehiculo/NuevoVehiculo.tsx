@@ -28,7 +28,7 @@ function Sidebar() {
         {items.map(item => (
           <a key={item.href} href={item.href}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition
-              ${item.active ? 'bg-white/15 text-white' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}>
+              ${(item as any).active ? 'bg-white/15 text-white' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}>
             {item.icon}
             {item.label}
           </a>
@@ -56,10 +56,13 @@ export default function NuevoVehiculo() {
   const [features, setFeatures] = useState<any[]>([])
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string>('')
+  const [galleryFiles, setGalleryFiles] = useState<File[]>([])
+  const [galleryPreviews, setGalleryPreviews] = useState<string[]>([])
 
   const [model, setModel] = useState({
     brand:'', name:'', version:'', price:'',
-    img_url:'', is_active:true, sort_order:0
+    img_url:'', notes:'', gallery:[] as string[],
+    is_active:true, sort_order:0
   })
   const [values, setValues] = useState<Record<string,string>>({})
 
@@ -74,7 +77,11 @@ export default function NuevoVehiculo() {
     setFeatures(f.data || [])
     if (modelId) {
       const { data: m } = await supabase.from('models').select('*').eq('id', modelId).single()
-      if (m) { setModel(m); if (m.img_url) setImagePreview(m.img_url) }
+      if (m) {
+        setModel(m)
+        if (m.img_url) setImagePreview(m.img_url)
+        if (m.gallery?.length) setGalleryPreviews(m.gallery)
+      }
       const { data: vals } = await supabase.from('feature_values').select('*').eq('model_id', modelId)
       if (vals) {
         const map: Record<string,string> = {}
@@ -93,35 +100,62 @@ export default function NuevoVehiculo() {
     setImagePreview(URL.createObjectURL(file))
   }
 
+  function handleGallerySelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+    setGalleryFiles(prev => [...prev, ...files])
+    setGalleryPreviews(prev => [...prev, ...files.map(f => URL.createObjectURL(f))])
+  }
+
+  function removeGalleryItem(idx: number) {
+    setGalleryFiles(prev => prev.filter((_, i) => i !== idx))
+    setGalleryPreviews(prev => prev.filter((_, i) => i !== idx))
+    setModel(prev => ({ ...prev, gallery: (prev.gallery || []).filter((_, i) => i !== idx) }))
+  }
+
+  async function uploadFile(file: File, path: string): Promise<string | null> {
+    const { error } = await supabase.storage.from('vehicles').upload(path, file, { upsert: true })
+    if (error) return null
+    const { data } = supabase.storage.from('vehicles').getPublicUrl(path)
+    return data.publicUrl
+  }
+
   async function save() {
     if (!model.brand || !model.name) { toast('Marca y modelo son obligatorios'); return }
     setLoading(true)
+
     let imgUrl = model.img_url
     if (imageFile) {
       const ext = imageFile.name.split('.').pop()
       const path = `${model.brand}${model.name}${model.version || 'default'}${Date.now()}.${ext}`.toLowerCase().replace(/[^a-z0-9.]/g, '')
-      const { error } = await supabase.storage.from('vehicles').upload(path, imageFile, { upsert: true })
-      if (!error) {
-        const { data } = supabase.storage.from('vehicles').getPublicUrl(path)
-        imgUrl = data.publicUrl
-      } else {
-        toast('Error imagen: ' + error.message)
-        setLoading(false)
-        return
-      }
+      const url = await uploadFile(imageFile, path)
+      if (url) imgUrl = url
+      else { toast('Error subiendo imagen principal'); setLoading(false); return }
     }
-    const modelData = { ...model, img_url: imgUrl }
+
+    let galleryUrls = [...(model.gallery || []).filter(u => u.startsWith('http'))]
+    for (const file of galleryFiles) {
+      const ext = file.name.split('.').pop()
+      const path = `gallery_${model.brand}${model.name}${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`.toLowerCase().replace(/[^a-z0-9._]/g, '')
+      const url = await uploadFile(file, path)
+      if (url) galleryUrls.push(url)
+    }
+
+    const modelData = { ...model, img_url: imgUrl, gallery: galleryUrls }
     let mid = modelId
+
     if (modelId) {
       await supabase.from('models').update(modelData).eq('id', modelId)
     } else {
       const { data } = await supabase.from('models').insert(modelData).select().single()
       mid = data?.id
     }
+
     if (mid) {
       const upserts = Object.entries(values).filter(([, v]) => v !== '').map(([feature_id, value]) => ({ feature_id, model_id: mid, value }))
       if (upserts.length > 0) await supabase.from('feature_values').upsert(upserts, { onConflict: 'feature_id,model_id' })
     }
+
     toast('Guardado ✓')
     setLoading(false)
     setTimeout(() => router.push('/'), 1200)
@@ -149,6 +183,8 @@ export default function NuevoVehiculo() {
         </div>
 
         <div className="max-w-3xl mx-auto p-6 space-y-6">
+
+          {/* IDENTIFICACIÓN */}
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <h2 className="font-black text-base mb-4 text-slate-700 uppercase tracking-wider">Identificación</h2>
             <div className="grid grid-cols-3 gap-4 mb-4">
@@ -160,8 +196,10 @@ export default function NuevoVehiculo() {
               <label className={lc}>Precio</label>
               <input className={ic} value={model.price} onChange={e => setModel({...model, price:e.target.value})} placeholder="ej. 16.450 €" />
             </div>
+
+            {/* IMAGEN PRINCIPAL */}
             <div className="mb-4">
-              <label className={lc}>Imagen del vehículo</label>
+              <label className={lc}>Imagen principal</label>
               <div className="flex items-center gap-4">
                 <div className="w-36 h-24 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center overflow-hidden shrink-0">
                   {imagePreview ? <img src={imagePreview} alt="preview" className="max-w-full max-h-full object-contain" /> : <span className="text-xs text-slate-400">Sin imagen</span>}
@@ -169,19 +207,54 @@ export default function NuevoVehiculo() {
                 <label className="flex-1 cursor-pointer">
                   <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-blue-300 hover:bg-blue-50 transition">
                     <div className="text-sm font-bold text-slate-600">📁 {imageFile ? imageFile.name : 'Seleccionar imagen'}</div>
-                    <div className="text-xs text-slate-400 mt-1">La imagen se sube al guardar · JPG, PNG, WebP</div>
+                    <div className="text-xs text-slate-400 mt-1">Se sube al guardar · JPG, PNG, WebP</div>
                   </div>
                   <input type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
                 </label>
               </div>
               {imagePreview && <button onClick={() => { setImageFile(null); setImagePreview(''); setModel({...model, img_url:''}) }} className="mt-2 text-xs text-red-500 hover:text-red-700">✕ Eliminar imagen</button>}
             </div>
+
             <div className="flex items-center gap-2">
               <input type="checkbox" id="active" checked={model.is_active} onChange={e => setModel({...model, is_active:e.target.checked})} />
               <label htmlFor="active" className="text-sm text-slate-600">Visible en el comparador</label>
             </div>
           </div>
 
+          {/* GALERÍA */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <h2 className="font-black text-base mb-2 text-slate-700 uppercase tracking-wider">Galería de fotos</h2>
+            <p className="text-xs text-slate-400 mb-4">Añade fotos adicionales del vehículo. La IA las usará para el análisis comparativo.</p>
+            <div className="grid grid-cols-3 md:grid-cols-4 gap-3 mb-4">
+              {galleryPreviews.map((url, idx) => (
+                <div key={idx} className="relative group aspect-video bg-slate-50 rounded-xl overflow-hidden border border-slate-200">
+                  <img src={url} className="w-full h-full object-cover" />
+                  <button onClick={() => removeGalleryItem(idx)}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white text-xs opacity-0 group-hover:opacity-100 transition flex items-center justify-center">✕</button>
+                </div>
+              ))}
+              <label className="aspect-video border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-300 hover:bg-blue-50 transition">
+                <span className="text-2xl text-slate-300">+</span>
+                <span className="text-xs text-slate-400 mt-1">Añadir</span>
+                <input type="file" accept="image/*" multiple onChange={handleGallerySelect} className="hidden" />
+              </label>
+            </div>
+          </div>
+
+          {/* NOTAS */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <h2 className="font-black text-base mb-2 text-slate-700 uppercase tracking-wider">Notas adicionales</h2>
+            <p className="text-xs text-slate-400 mb-3">Información relevante sobre el vehículo: argumentario comercial, puntos diferenciales, información del fabricante, etc. La IA usará este texto en el análisis comparativo.</p>
+            <textarea
+              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-400 resize-none"
+              rows={6}
+              placeholder="Ej: El LIUX BIG 15 destaca por su diseño innovador y su tecnología de carga rápida. Según el fabricante, es el vehículo eléctrico urbano más eficiente de su segmento..."
+              value={model.notes || ''}
+              onChange={e => setModel({...model, notes:e.target.value})}
+            />
+          </div>
+
+          {/* CARACTERÍSTICAS */}
           {categories.map(cat => {
             const catFeats = features.filter(f => f.category_id === cat.id)
             if (!catFeats.length) return null
