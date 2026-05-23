@@ -26,16 +26,18 @@ export async function POST(req: NextRequest) {
         text += `  - ${feat.name}: ${val}\n`
       })
     })
-    if (model.notes) text += `\nNotas adicionales:\n${model.notes}\n`
+    if (model.notes) text += `\nInformación adicional del fabricante/comercial:\n${model.notes}\n`
     return text
   }
 
   const specs1 = buildSpecs(model1)
   const specs2 = buildSpecs(model2)
 
-  const prompt = `Eres un experto en análisis comercial y técnico de vehículos eléctricos compactos.
+  const prompt = `Eres un experto en análisis comercial y técnico de vehículos eléctricos compactos urbanos.
 
 Analiza y compara estos dos vehículos eléctricos en detalle. Responde en ${langLabels[lang] || 'español'}.
+Usa toda la información disponible incluyendo las notas adicionales y las imágenes para enriquecer el análisis.
+Si hay imágenes disponibles, analiza el diseño exterior, acabados, habitabilidad aparente y atractivo visual.
 
 === VEHÍCULO 1 ===
 ${specs1}
@@ -46,39 +48,61 @@ ${specs2}
 Genera un informe comparativo estructurado con estas secciones exactas en formato Markdown:
 
 ## Resumen ejecutivo
-(3-4 frases resumiendo la comparativa y el posicionamiento de cada vehículo)
+(3-4 frases resumiendo la comparativa y el posicionamiento de cada vehículo en el mercado)
 
 ## Análisis técnico
-(Compara las especificaciones más relevantes: autonomía, potencia, batería, velocidad, carga)
+(Compara las especificaciones más relevantes: autonomía, potencia, batería, velocidad, carga. Destaca diferencias clave)
 
 ## Análisis comercial
-(Compara precio, equipamiento, relación calidad-precio, público objetivo)
+(Compara precio, equipamiento, relación calidad-precio, público objetivo, posicionamiento de marca)
+
+## Análisis de diseño
+(Basándote en las imágenes disponibles, analiza el diseño exterior, estética, modernidad y atractivo visual de cada vehículo)
 
 ## Puntos fuertes
 ### ${model1.brand} ${model1.name} ${model1.version || ''}
 - punto fuerte 1
 - punto fuerte 2
-- ...
 
 ### ${model2.brand} ${model2.name} ${model2.version || ''}
 - punto fuerte 1
 - punto fuerte 2
-- ...
 
 ## Puntos débiles
 ### ${model1.brand} ${model1.name} ${model1.version || ''}
 - punto débil 1
-- ...
 
 ### ${model2.brand} ${model2.name} ${model2.version || ''}
 - punto débil 1
-- ...
+
+## Perfil de cliente ideal
+### ${model1.brand} ${model1.name} ${model1.version || ''}
+(Describe el perfil de cliente ideal)
+
+### ${model2.brand} ${model2.name} ${model2.version || ''}
+(Describe el perfil de cliente ideal)
 
 ## Recomendación comercial
-(¿A qué perfil de cliente le recomendarías cada vehículo? ¿Cuál tiene mejor posicionamiento?)
+(¿Cuál tiene mejor posicionamiento? ¿En qué escenarios gana cada uno?)
 
 ## Veredicto final
 (Una conclusión clara y directa de máximo 2 frases)`
+
+  // Build image content from galleries and main images
+  const imageUrls: string[] = []
+  for (const model of [model1, model2]) {
+    if (model.img_url) imageUrls.push(model.img_url)
+    if (model.gallery?.length) imageUrls.push(...model.gallery.slice(0, 3))
+  }
+
+  // Build message content
+  const content: any[] = [{ type: 'text', text: prompt }]
+  for (const url of imageUrls.slice(0, 8)) {
+    content.push({
+      type: 'image_url',
+      image_url: { url, detail: 'low' }
+    })
+  }
 
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -88,9 +112,9 @@ Genera un informe comparativo estructurado con estas secciones exactas en format
         'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 2000,
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content }],
+        max_tokens: 2500,
         temperature: 0.7
       })
     })
