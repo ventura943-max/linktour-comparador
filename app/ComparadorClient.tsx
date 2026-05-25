@@ -351,18 +351,25 @@ function Categorias({ t }: { t: T }) {
   }
 
   function exportExcel() {
-    const rows = features.map(f => {
-      const cat = categories.find(c => c.id === f.category_id)
-      return {
-        'Categoría (EN)': cat?.name || '',
-        'Categoría (ES)': cat?.name_es || '',
-        'Categoría (IT)': cat?.name_it || '',
-        'Característica (EN)': f.name,
-        'Característica (ES)': f.name_es || '',
-        'Característica (IT)': f.name_it || '',
-        'Tipo': f.type,
-        'Orden': f.sort_order,
-      }
+    // Ordenar categorías por sort_order, luego features por categoria y sort_order
+    const sortedCats = [...categories].sort((a, b) => a.sort_order - b.sort_order)
+    const rows: any[] = []
+    sortedCats.forEach(cat => {
+      const catFeats = features
+        .filter(f => f.category_id === cat.id)
+        .sort((a, b) => a.sort_order - b.sort_order)
+      catFeats.forEach(f => {
+        rows.push({
+          'Categoría (EN)': cat.name,
+          'Categoría (ES)': cat.name_es || '',
+          'Categoría (IT)': cat.name_it || '',
+          'Característica (EN)': f.name,
+          'Característica (ES)': f.name_es || '',
+          'Característica (IT)': f.name_it || '',
+          'Tipo': f.type,
+          'Orden': f.sort_order,
+        })
+      })
     })
     const ws = XLSX.utils.json_to_sheet(rows)
     ws['!cols'] = [
@@ -387,7 +394,6 @@ function Categorias({ t }: { t: T }) {
         const wb = XLSX.read(data, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows: any[] = XLSX.utils.sheet_to_json(ws)
-
         let added = 0
         for (const row of rows) {
           const catNameEN = String(row['Categoría (EN)'] || '').trim()
@@ -396,17 +402,11 @@ function Categorias({ t }: { t: T }) {
           const sort_order = parseInt(row['Orden'] || '0')
           const name_es = String(row['Característica (ES)'] || '').trim()
           const name_it = String(row['Característica (IT)'] || '').trim()
-
           if (!catNameEN || !featNameEN) continue
-
-          // Check if feature already exists
           const exists = features.find(f => f.name.toLowerCase() === featNameEN.toLowerCase())
           if (exists) continue
-
-          // Find or skip category
           const cat = categories.find(c => c.name.toLowerCase() === catNameEN.toLowerCase())
           if (!cat) continue
-
           await supabase.from('features').insert({
             name: featNameEN,
             name_es: name_es || null,
@@ -440,22 +440,17 @@ function Categorias({ t }: { t: T }) {
           <p className="text-slate-500 text-sm">{t.categoriasSubtitle}</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={exportExcel}
-            className="px-4 py-2 border border-slate-300 bg-white text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50 flex items-center gap-2">
-            ⬇ Exportar Excel
-          </button>
-          <label className={`px-4 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg hover:bg-[#162040] cursor-pointer flex items-center gap-2 ${importing ? 'opacity-50' : ''}`}>
+          <button onClick={exportExcel} className="px-4 py-2 border border-slate-300 bg-white text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50">⬇ Exportar Excel</button>
+          <label className={`px-4 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg hover:bg-[#162040] cursor-pointer ${importing ? 'opacity-50' : ''}`}>
             ⬆ {importing ? 'Importando...' : 'Importar Excel'}
             <input type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" disabled={importing} />
           </label>
         </div>
       </div>
-
       <div className="flex gap-2 mb-6">
         <button onClick={() => setTab('cats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'cats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>{t.categoriasTitle}</button>
         <button onClick={() => setTab('feats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'feats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>{t.caracteristicas}</button>
       </div>
-
       {tab === 'cats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
@@ -470,9 +465,9 @@ function Categorias({ t }: { t: T }) {
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <h2 className="font-black text-base mb-4">{t.categoriasTitle} ({categories.length})</h2>
             <div className="space-y-2">
-              {categories.map(c => (
+              {[...categories].sort((a,b) => a.sort_order - b.sort_order).map(c => (
                 <div key={c.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-xl hover:bg-slate-50">
-                  <div><div className="font-bold text-sm">{c.name}</div><div className="text-xs text-slate-400">{t.orden}: {c.sort_order}</div></div>
+                  <div><div className="font-bold text-sm">{c.name}</div><div className="text-xs text-slate-400">{c.name_es && <span className="mr-2">ES: {c.name_es}</span>}{t.orden}: {c.sort_order}</div></div>
                   <div className="flex gap-2">
                     <button onClick={() => { setEditCatId(c.id); setCatForm(c) }} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏</button>
                     <button onClick={() => deleteCat(c.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button>
@@ -483,7 +478,6 @@ function Categorias({ t }: { t: T }) {
           </div>
         </div>
       )}
-
       {tab === 'feats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
@@ -493,7 +487,7 @@ function Categorias({ t }: { t: T }) {
               <label className={lc}>{t.categoria}</label>
               <select className={ic} value={featForm.category_id} onChange={e => setFeatForm({ ...featForm, category_id: e.target.value })}>
                 <option value="">{t.selecciona}</option>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {[...categories].sort((a,b) => a.sort_order - b.sort_order).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className="mb-3">
@@ -512,8 +506,8 @@ function Categorias({ t }: { t: T }) {
           </div>
           <div className="bg-white rounded-2xl p-6 shadow-sm overflow-y-auto max-h-[600px]">
             <h2 className="font-black text-base mb-4">{t.caracteristicas} ({features.length})</h2>
-            {categories.map(cat => {
-              const catFeats = features.filter(f => f.category_id === cat.id)
+            {[...categories].sort((a,b) => a.sort_order - b.sort_order).map(cat => {
+              const catFeats = [...features.filter(f => f.category_id === cat.id)].sort((a,b) => a.sort_order - b.sort_order)
               if (!catFeats.length) return null
               return (
                 <div key={cat.id} className="mb-3">
