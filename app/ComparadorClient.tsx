@@ -2,6 +2,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { translations, Lang, T } from '@/lib/i18n'
+import * as XLSX from 'xlsx'
+import { saveAs } from 'file-saver'
 
 const IconComparador = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="18"/><rect x="14" y="3" width="7" height="18"/></svg>
 const IconModelos = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 17H5a2 2 0 01-2-2V7l3-4h12l3 4v8a2 2 0 01-2 2z"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg>
@@ -208,32 +210,23 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
             {selectedModels.map((m: any) => <col key={m.id} style={{ width: '90px' }} />)}
           </colgroup>
           <thead>
-            {/* FILA 1: MARCA */}
             <tr>
               <th colSpan={2} className="bg-[#081224]"></th>
               {selectedModels.map((m: any) => (
-                <th key={m.id} className="bg-[#0d1e3a] text-[#7aa4cc] text-center py-1.5 text-[8px] font-black tracking-widest uppercase border border-[#1a2f4a]">
-                  {m.brand}
-                </th>
+                <th key={m.id} className="bg-[#0d1e3a] text-[#7aa4cc] text-center py-1.5 text-[8px] font-black tracking-widest uppercase border border-[#1a2f4a]">{m.brand}</th>
               ))}
             </tr>
-            {/* FILA 2: MODELO */}
             <tr>
               <th colSpan={2} className="bg-[#081224]"></th>
               {selectedModels.map((m: any) => (
-                <th key={m.id} className="bg-[#14243a] text-[#a8c4e8] text-center py-1.5 text-[8px] font-black tracking-wider uppercase border border-[#1a2f4a]">
-                  {m.name}
-                </th>
+                <th key={m.id} className="bg-[#14243a] text-[#a8c4e8] text-center py-1.5 text-[8px] font-black tracking-wider uppercase border border-[#1a2f4a]">{m.name}</th>
               ))}
             </tr>
-            {/* FILA 3: VERSION */}
             <tr>
               <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px]">{t.cat}</th>
               <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px]">{t.caracteristica}</th>
               {selectedModels.map((m: any) => (
-                <th key={m.id} className="bg-[#1c3050] text-white text-center px-1 py-2 font-black text-[8px] border border-[#1a2f4a]">
-                  {m.version || m.name}
-                </th>
+                <th key={m.id} className="bg-[#1c3050] text-white text-center px-1 py-2 font-black text-[8px] border border-[#1a2f4a]">{m.version || m.name}</th>
               ))}
             </tr>
           </thead>
@@ -321,13 +314,19 @@ function Categorias({ t }: { t: T }) {
   const [editCatId, setEditCatId] = useState<string | null>(null)
   const [featForm, setFeatForm] = useState({ name: '', category_id: '', type: 'boolean', sort_order: 0 })
   const [editFeatId, setEditFeatId] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
 
   useEffect(() => { loadAll() }, [])
   async function loadAll() {
-    const [c, f] = await Promise.all([supabase.from('categories').select('*').order('sort_order'), supabase.from('features').select('*').order('sort_order')])
-    setCategories(c.data || []); setFeatures(f.data || [])
+    const [c, f] = await Promise.all([
+      supabase.from('categories').select('*').order('sort_order'),
+      supabase.from('features').select('*').order('sort_order')
+    ])
+    setCategories(c.data || [])
+    setFeatures(f.data || [])
   }
-  function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 3000) }
+  function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 4000) }
+
   async function saveCat() {
     if (!catForm.name) { toast(t.nombreObligatorio); return }
     if (editCatId) await supabase.from('categories').update(catForm).eq('id', editCatId)
@@ -350,17 +349,113 @@ function Categorias({ t }: { t: T }) {
     await supabase.from('features').delete().eq('id', id)
     toast(t.eliminado); loadAll()
   }
+
+  function exportExcel() {
+    const rows = features.map(f => {
+      const cat = categories.find(c => c.id === f.category_id)
+      return {
+        'Categoría (EN)': cat?.name || '',
+        'Categoría (ES)': cat?.name_es || '',
+        'Categoría (IT)': cat?.name_it || '',
+        'Característica (EN)': f.name,
+        'Característica (ES)': f.name_es || '',
+        'Característica (IT)': f.name_it || '',
+        'Tipo': f.type,
+        'Orden': f.sort_order,
+      }
+    })
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws['!cols'] = [
+      { wch: 25 }, { wch: 25 }, { wch: 25 },
+      { wch: 40 }, { wch: 40 }, { wch: 40 },
+      { wch: 12 }, { wch: 8 }
+    ]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Características')
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), 'caracteristicas-liux.xlsx')
+  }
+
+  async function importExcel(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImporting(true)
+    const reader = new FileReader()
+    reader.onload = async (ev) => {
+      try {
+        const data = new Uint8Array(ev.target?.result as ArrayBuffer)
+        const wb = XLSX.read(data, { type: 'array' })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const rows: any[] = XLSX.utils.sheet_to_json(ws)
+
+        let added = 0
+        for (const row of rows) {
+          const catNameEN = String(row['Categoría (EN)'] || '').trim()
+          const featNameEN = String(row['Característica (EN)'] || '').trim()
+          const type = String(row['Tipo'] || 'text').trim()
+          const sort_order = parseInt(row['Orden'] || '0')
+          const name_es = String(row['Característica (ES)'] || '').trim()
+          const name_it = String(row['Característica (IT)'] || '').trim()
+
+          if (!catNameEN || !featNameEN) continue
+
+          // Check if feature already exists
+          const exists = features.find(f => f.name.toLowerCase() === featNameEN.toLowerCase())
+          if (exists) continue
+
+          // Find or skip category
+          const cat = categories.find(c => c.name.toLowerCase() === catNameEN.toLowerCase())
+          if (!cat) continue
+
+          await supabase.from('features').insert({
+            name: featNameEN,
+            name_es: name_es || null,
+            name_it: name_it || null,
+            category_id: cat.id,
+            type,
+            sort_order
+          })
+          added++
+        }
+        toast(`✓ ${added} características nuevas añadidas`)
+        await loadAll()
+      } catch {
+        toast('Error al procesar el archivo')
+      }
+      setImporting(false)
+    }
+    reader.readAsArrayBuffer(file)
+    e.target.value = ''
+  }
+
   const ic = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
   const lc = "block text-xs font-bold text-slate-500 uppercase mb-1"
+
   return (
     <div>
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
-      <h1 className="text-2xl font-black tracking-tight mb-1">{t.categoriasTitle}</h1>
-      <p className="text-slate-500 text-sm mb-6">{t.categoriasSubtitle}</p>
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight mb-1">{t.categoriasTitle}</h1>
+          <p className="text-slate-500 text-sm">{t.categoriasSubtitle}</p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={exportExcel}
+            className="px-4 py-2 border border-slate-300 bg-white text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50 flex items-center gap-2">
+            ⬇ Exportar Excel
+          </button>
+          <label className={`px-4 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg hover:bg-[#162040] cursor-pointer flex items-center gap-2 ${importing ? 'opacity-50' : ''}`}>
+            ⬆ {importing ? 'Importando...' : 'Importar Excel'}
+            <input type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" disabled={importing} />
+          </label>
+        </div>
+      </div>
+
       <div className="flex gap-2 mb-6">
         <button onClick={() => setTab('cats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'cats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>{t.categoriasTitle}</button>
         <button onClick={() => setTab('feats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'feats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>{t.caracteristicas}</button>
       </div>
+
       {tab === 'cats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
@@ -388,6 +483,7 @@ function Categorias({ t }: { t: T }) {
           </div>
         </div>
       )}
+
       {tab === 'feats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
@@ -450,30 +546,18 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
   const [error, setError] = useState('')
 
   const segmentFeat = features.find((f: any) => f.name === 'Segment')
-
   const segments: string[] = segmentFeat
-    ? Array.from(new Set<string>(
-        values
-          .filter((v: any) => v.feature_id === segmentFeat.id && v.value)
-          .map((v: any) => String(v.value))
-      )).sort()
+    ? Array.from(new Set<string>(values.filter((v: any) => v.feature_id === segmentFeat.id && v.value).map((v: any) => String(v.value)))).sort()
     : []
 
   const modelsInSegment = segment && segmentFeat
-    ? models.filter((m: any) =>
-        values.find((v: any) => v.feature_id === segmentFeat.id && v.model_id === m.id && v.value === segment)
-      )
+    ? models.filter((m: any) => values.find((v: any) => v.feature_id === segmentFeat.id && v.model_id === m.id && v.value === segment))
     : models
 
   const model1 = modelsInSegment.find((m: any) => m.id === model1Id)
   const model2 = modelsInSegment.find((m: any) => m.id === model2Id)
 
-  useEffect(() => {
-    setModel1Id('')
-    setModel2Id('')
-    setAnalysis('')
-    setError('')
-  }, [segment])
+  useEffect(() => { setModel1Id(''); setModel2Id(''); setAnalysis(''); setError('') }, [segment])
 
   async function generate() {
     if (!model1 || !model2) return
@@ -504,33 +588,21 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
     <div>
       <h1 className="text-2xl font-black tracking-tight mb-1">{t.analisis}</h1>
       <p className="text-slate-500 text-sm mb-6">Selecciona un segmento y dos vehículos para generar un análisis comparativo con IA</p>
-
       <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-6 shadow-sm">
         <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-3">Segmento</label>
         <div className="flex gap-3 flex-wrap">
-          <button onClick={() => setSegment('')}
-            className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${!segment ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
-            Todos
-          </button>
-          {segments.map((seg) => (
-            <button key={seg} onClick={() => setSegment(seg)}
-              className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${segment === seg ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
-              {seg}
-            </button>
+          <button onClick={() => setSegment('')} className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${!segment ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>Todos</button>
+          {segments.map(seg => (
+            <button key={seg} onClick={() => setSegment(seg)} className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${segment === seg ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>{seg}</button>
           ))}
         </div>
         {segment && <p className="text-xs text-slate-400 mt-2">{modelsInSegment.length} vehículos en el segmento {segment}</p>}
       </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        {[
-          { label: 'Vehículo 1', value: model1Id, set: setModel1Id, other: model2Id },
-          { label: 'Vehículo 2', value: model2Id, set: setModel2Id, other: model1Id },
-        ].map(({ label, value, set, other }) => (
+        {[{ label: 'Vehículo 1', value: model1Id, set: setModel1Id, other: model2Id }, { label: 'Vehículo 2', value: model2Id, set: setModel2Id, other: model1Id }].map(({ label, value, set, other }) => (
           <div key={label}>
             <label className="block text-xs font-bold text-slate-500 uppercase mb-2">{label}</label>
-            <select value={value} onChange={e => set(e.target.value)}
-              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-400 bg-white">
+            <select value={value} onChange={e => set(e.target.value)} className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-400 bg-white">
               <option value="">Selecciona un vehículo...</option>
               {modelsInSegment.filter((m: any) => m.id !== other).map((m: any) => (
                 <option key={m.id} value={m.id}>{m.brand} {m.name} {m.version}</option>
@@ -539,7 +611,6 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
           </div>
         ))}
       </div>
-
       {model1 && model2 && (
         <div className="grid grid-cols-2 gap-4 mb-6">
           {[model1, model2].map((m: any) => (
@@ -556,21 +627,11 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
           ))}
         </div>
       )}
-
       <button onClick={generate} disabled={!model1 || !model2 || loading}
         className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-40 text-sm mb-6 flex items-center justify-center gap-2">
-        {loading ? (
-          <>
-            <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/>
-            </svg>
-            Generando análisis...
-          </>
-        ) : '✦ Generar análisis con IA'}
+        {loading ? (<><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>Generando análisis...</>) : '✦ Generar análisis con IA'}
       </button>
-
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">{error}</div>}
-
       {analysis && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8">
           <div className="flex items-center justify-between mb-4">
@@ -578,8 +639,7 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
               <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Análisis generado por IA</span>
             </div>
-            <button onClick={() => navigator.clipboard.writeText(analysis)}
-              className="text-xs text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg px-3 py-1">📋 Copiar</button>
+            <button onClick={() => navigator.clipboard.writeText(analysis)} className="text-xs text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg px-3 py-1">📋 Copiar</button>
           </div>
           <div dangerouslySetInnerHTML={{ __html: renderMarkdown(analysis) }} />
         </div>
