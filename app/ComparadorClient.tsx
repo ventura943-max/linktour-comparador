@@ -30,6 +30,11 @@ function getName(item: any, lang: Lang) {
   return item.name
 }
 
+function formatDate(iso: string) {
+  const d = new Date(iso)
+  return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMobileOpen, lang, setLang, t }: any) {
   const items = [
     { id: 'comparador', label: t.comparador, icon: <IconComparador /> },
@@ -118,9 +123,7 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
     return val(f.id, modelId)
   }
 
-  const activeCardFields = cardFields
-    .filter((f: any) => f.enabled)
-    .sort((a: any, b: any) => a.order - b.order)
+  const activeCardFields = cardFields.filter((f: any) => f.enabled).sort((a: any, b: any) => a.order - b.order)
 
   const filteredFeatures = categories.flatMap((cat: any) => {
     const feats = features.filter((f: any) => {
@@ -308,6 +311,7 @@ function Modelos({ t }: { t: T }) {
 function Categorias({ t }: { t: T }) {
   const [categories, setCategories] = useState<any[]>([])
   const [features, setFeatures] = useState<any[]>([])
+  const [versions, setVersions] = useState<any[]>([])
   const [msg, setMsg] = useState('')
   const [tab, setTab] = useState('cats')
   const [catForm, setCatForm] = useState({ name: '', sort_order: 0 })
@@ -315,16 +319,26 @@ function Categorias({ t }: { t: T }) {
   const [featForm, setFeatForm] = useState({ name: '', category_id: '', type: 'boolean', sort_order: 0 })
   const [editFeatId, setEditFeatId] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
+  const [uploadNote, setUploadNote] = useState('')
+  const [viewVersion, setViewVersion] = useState<any | null>(null)
+  const [compareA, setCompareA] = useState<string>('')
+  const [compareB, setCompareB] = useState<string>('')
+  const [showCompare, setShowCompare] = useState(false)
+  const [restoring, setRestoring] = useState(false)
 
   useEffect(() => { loadAll() }, [])
+
   async function loadAll() {
-    const [c, f] = await Promise.all([
+    const [c, f, v] = await Promise.all([
       supabase.from('categories').select('*').order('sort_order'),
-      supabase.from('features').select('*').order('sort_order')
+      supabase.from('features').select('*').order('sort_order'),
+      supabase.from('excel_versions').select('*').order('created_at', { ascending: false })
     ])
     setCategories(c.data || [])
     setFeatures(f.data || [])
+    setVersions(v.data || [])
   }
+
   function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 4000) }
 
   async function saveCat() {
@@ -351,13 +365,10 @@ function Categorias({ t }: { t: T }) {
   }
 
   function exportExcel() {
-    // Ordenar categorías por sort_order, luego features por categoria y sort_order
     const sortedCats = [...categories].sort((a, b) => a.sort_order - b.sort_order)
     const rows: any[] = []
     sortedCats.forEach(cat => {
-      const catFeats = features
-        .filter(f => f.category_id === cat.id)
-        .sort((a, b) => a.sort_order - b.sort_order)
+      const catFeats = features.filter(f => f.category_id === cat.id).sort((a, b) => a.sort_order - b.sort_order)
       catFeats.forEach(f => {
         rows.push({
           'Categoría (EN)': cat.name,
@@ -372,11 +383,7 @@ function Categorias({ t }: { t: T }) {
       })
     })
     const ws = XLSX.utils.json_to_sheet(rows)
-    ws['!cols'] = [
-      { wch: 25 }, { wch: 25 }, { wch: 25 },
-      { wch: 40 }, { wch: 40 }, { wch: 40 },
-      { wch: 12 }, { wch: 8 }
-    ]
+    ws['!cols'] = [{ wch: 25 }, { wch: 25 }, { wch: 25 }, { wch: 40 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 8 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Características')
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
@@ -394,6 +401,13 @@ function Categorias({ t }: { t: T }) {
         const wb = XLSX.read(data, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows: any[] = XLSX.utils.sheet_to_json(ws)
+
+        // Snapshot del estado actual antes de importar
+        const snapshot = features.map(f => {
+          const cat = categories.find(c => c.id === f.category_id)
+          return { category: cat?.name || '', feature: f.name, type: f.type, name_es: f.name_es, name_it: f.name_it }
+        })
+
         let added = 0
         for (const row of rows) {
           const catNameEN = String(row['Categoría (EN)'] || '').trim()
@@ -408,16 +422,22 @@ function Categorias({ t }: { t: T }) {
           const cat = categories.find(c => c.name.toLowerCase() === catNameEN.toLowerCase())
           if (!cat) continue
           await supabase.from('features').insert({
-            name: featNameEN,
-            name_es: name_es || null,
-            name_it: name_it || null,
-            category_id: cat.id,
-            type,
-            sort_order
+            name: featNameEN, name_es: name_es || null, name_it: name_it || null,
+            category_id: cat.id, type, sort_order
           })
           added++
         }
+
+        // Guardar versión
+        await supabase.from('excel_versions').insert({
+          filename: file.name,
+          snapshot,
+          changes_added: added,
+          notes: uploadNote || null
+        })
+
         toast(`✓ ${added} características nuevas añadidas`)
+        setUploadNote('')
         await loadAll()
       } catch {
         toast('Error al procesar el archivo')
@@ -428,29 +448,165 @@ function Categorias({ t }: { t: T }) {
     e.target.value = ''
   }
 
+  async function restoreVersion(version: any) {
+    if (!confirm(`¿Restaurar al estado del ${formatDate(version.created_at)}? Se eliminarán todas las características actuales y se restaurarán las de esa versión.`)) return
+    setRestoring(true)
+    try {
+      // Eliminar todas las características actuales
+      await supabase.from('features').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      // Restaurar desde snapshot
+      for (const item of version.snapshot) {
+        const cat = categories.find((c: any) => c.name === item.category)
+        if (!cat) continue
+        await supabase.from('features').insert({
+          name: item.feature, type: item.type,
+          name_es: item.name_es || null, name_it: item.name_it || null,
+          category_id: cat.id, sort_order: 0
+        })
+      }
+      toast('✓ Versión restaurada correctamente')
+      await loadAll()
+    } catch {
+      toast('Error al restaurar')
+    }
+    setRestoring(false)
+  }
+
+  function getDiff(vA: any, vB: any) {
+    const snapA: any[] = vA.snapshot || []
+    const snapB: any[] = vB.snapshot || []
+    const namesA = new Set(snapA.map((x: any) => x.feature))
+    const namesB = new Set(snapB.map((x: any) => x.feature))
+    const added = snapB.filter((x: any) => !namesA.has(x.feature))
+    const removed = snapA.filter((x: any) => !namesB.has(x.feature))
+    const kept = snapA.filter((x: any) => namesB.has(x.feature))
+    return { added, removed, kept }
+  }
+
   const ic = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
   const lc = "block text-xs font-bold text-slate-500 uppercase mb-1"
+
+  const vA = versions.find(v => v.id === compareA)
+  const vB = versions.find(v => v.id === compareB)
+  const diff = vA && vB ? getDiff(vA, vB) : null
 
   return (
     <div>
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
+
+      {/* Modal ver versión */}
+      {viewVersion && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div>
+                <div className="font-black text-base">Versión del {formatDate(viewVersion.created_at)}</div>
+                <div className="text-xs text-slate-400">{viewVersion.filename} · {viewVersion.snapshot?.length || 0} características</div>
+              </div>
+              <button onClick={() => setViewVersion(null)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            </div>
+            <div className="overflow-y-auto p-6">
+              {categories.map((cat: any) => {
+                const catItems = (viewVersion.snapshot || []).filter((x: any) => x.category === cat.name)
+                if (!catItems.length) return null
+                return (
+                  <div key={cat.id} className="mb-4">
+                    <div className="text-xs font-black text-slate-400 uppercase tracking-wider py-1 border-b border-slate-100 mb-2">{cat.name}</div>
+                    {catItems.map((x: any, i: number) => (
+                      <div key={i} className="text-sm text-slate-700 py-1 border-b border-slate-50">{x.feature}</div>
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal comparar */}
+      {showCompare && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div className="font-black text-base">Comparar versiones</div>
+              <button onClick={() => setShowCompare(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            </div>
+            <div className="p-6 border-b border-slate-100">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={lc}>Versión A (base)</label>
+                  <select className={ic} value={compareA} onChange={e => setCompareA(e.target.value)}>
+                    <option value="">Selecciona...</option>
+                    {versions.map(v => <option key={v.id} value={v.id}>{formatDate(v.created_at)} — {v.filename}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={lc}>Versión B (nueva)</label>
+                  <select className={ic} value={compareB} onChange={e => setCompareB(e.target.value)}>
+                    <option value="">Selecciona...</option>
+                    {versions.filter(v => v.id !== compareA).map(v => <option key={v.id} value={v.id}>{formatDate(v.created_at)} — {v.filename}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+            {diff && (
+              <div className="overflow-y-auto p-6 space-y-4">
+                {diff.added.length > 0 && (
+                  <div>
+                    <div className="text-xs font-black text-emerald-600 uppercase tracking-wider mb-2">✓ Añadidas en B ({diff.added.length})</div>
+                    {diff.added.map((x: any, i: number) => (
+                      <div key={i} className="text-sm text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg mb-1">{x.category} → {x.feature}</div>
+                    ))}
+                  </div>
+                )}
+                {diff.removed.length > 0 && (
+                  <div>
+                    <div className="text-xs font-black text-red-500 uppercase tracking-wider mb-2">✗ Eliminadas en B ({diff.removed.length})</div>
+                    {diff.removed.map((x: any, i: number) => (
+                      <div key={i} className="text-sm text-red-600 bg-red-50 px-3 py-1.5 rounded-lg mb-1">{x.category} → {x.feature}</div>
+                    ))}
+                  </div>
+                )}
+                {diff.added.length === 0 && diff.removed.length === 0 && (
+                  <div className="text-center text-slate-400 py-6">Las dos versiones son idénticas</div>
+                )}
+                <div className="text-xs text-slate-400">{diff.kept.length} características sin cambios</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-black tracking-tight mb-1">{t.categoriasTitle}</h1>
           <p className="text-slate-500 text-sm">{t.categoriasSubtitle}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button onClick={exportExcel} className="px-4 py-2 border border-slate-300 bg-white text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50">⬇ Exportar Excel</button>
+          <button onClick={() => setShowCompare(true)} className="px-4 py-2 border border-slate-300 bg-white text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50">🔀 Comparar versiones</button>
           <label className={`px-4 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg hover:bg-[#162040] cursor-pointer ${importing ? 'opacity-50' : ''}`}>
             ⬆ {importing ? 'Importando...' : 'Importar Excel'}
             <input type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" disabled={importing} />
           </label>
         </div>
       </div>
-      <div className="flex gap-2 mb-6">
-        <button onClick={() => setTab('cats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'cats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>{t.categoriasTitle}</button>
-        <button onClick={() => setTab('feats')} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === 'feats' ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>{t.caracteristicas}</button>
+
+      {/* Nota para importación */}
+      <div className="bg-white rounded-xl border border-slate-100 px-4 py-3 mb-4 flex items-center gap-3">
+        <span className="text-xs font-bold text-slate-400 uppercase whitespace-nowrap">Nota (opcional)</span>
+        <input className="flex-1 text-sm outline-none text-slate-600" placeholder="Ej: Añadidas características de conectividad v2..." value={uploadNote} onChange={e => setUploadNote(e.target.value)} />
       </div>
+
+      <div className="flex gap-2 mb-6">
+        {[['cats', t.categoriasTitle], ['feats', t.caracteristicas], ['history', '📋 Historial']].map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)}
+            className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === id ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       {tab === 'cats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
@@ -465,7 +621,7 @@ function Categorias({ t }: { t: T }) {
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <h2 className="font-black text-base mb-4">{t.categoriasTitle} ({categories.length})</h2>
             <div className="space-y-2">
-              {[...categories].sort((a,b) => a.sort_order - b.sort_order).map(c => (
+              {[...categories].sort((a, b) => a.sort_order - b.sort_order).map(c => (
                 <div key={c.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-xl hover:bg-slate-50">
                   <div><div className="font-bold text-sm">{c.name}</div><div className="text-xs text-slate-400">{c.name_es && <span className="mr-2">ES: {c.name_es}</span>}{t.orden}: {c.sort_order}</div></div>
                   <div className="flex gap-2">
@@ -478,6 +634,7 @@ function Categorias({ t }: { t: T }) {
           </div>
         </div>
       )}
+
       {tab === 'feats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
@@ -487,7 +644,7 @@ function Categorias({ t }: { t: T }) {
               <label className={lc}>{t.categoria}</label>
               <select className={ic} value={featForm.category_id} onChange={e => setFeatForm({ ...featForm, category_id: e.target.value })}>
                 <option value="">{t.selecciona}</option>
-                {[...categories].sort((a,b) => a.sort_order - b.sort_order).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {[...categories].sort((a, b) => a.sort_order - b.sort_order).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className="mb-3">
@@ -506,8 +663,8 @@ function Categorias({ t }: { t: T }) {
           </div>
           <div className="bg-white rounded-2xl p-6 shadow-sm overflow-y-auto max-h-[600px]">
             <h2 className="font-black text-base mb-4">{t.caracteristicas} ({features.length})</h2>
-            {[...categories].sort((a,b) => a.sort_order - b.sort_order).map(cat => {
-              const catFeats = [...features.filter(f => f.category_id === cat.id)].sort((a,b) => a.sort_order - b.sort_order)
+            {[...categories].sort((a, b) => a.sort_order - b.sort_order).map(cat => {
+              const catFeats = [...features.filter(f => f.category_id === cat.id)].sort((a, b) => a.sort_order - b.sort_order)
               if (!catFeats.length) return null
               return (
                 <div key={cat.id} className="mb-3">
@@ -524,6 +681,56 @@ function Categorias({ t }: { t: T }) {
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {tab === 'history' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+            <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Historial de versiones</span>
+            <span className="text-xs text-slate-400">{versions.length} versiones</span>
+          </div>
+          {versions.length === 0 && (
+            <div className="text-center py-12 text-slate-400">
+              <div className="text-4xl mb-3">📋</div>
+              <div className="font-bold">Sin versiones todavía</div>
+              <div className="text-sm mt-1">Las versiones se guardan automáticamente al importar un Excel</div>
+            </div>
+          )}
+          <div className="divide-y divide-slate-50">
+            {versions.map((v, idx) => (
+              <div key={v.id} className="px-5 py-4 hover:bg-slate-50">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${idx === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                      {idx === 0 ? '✓' : versions.length - idx}
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm flex items-center gap-2">
+                        {formatDate(v.created_at)}
+                        {idx === 0 && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-black">ACTUAL</span>}
+                      </div>
+                      <div className="text-xs text-slate-400 mt-0.5">{v.filename}</div>
+                      {v.notes && <div className="text-xs text-slate-600 mt-1 bg-slate-50 px-2 py-1 rounded-lg">{v.notes}</div>}
+                      <div className="flex gap-3 mt-1">
+                        <span className="text-xs text-emerald-600">+{v.changes_added} añadidas</span>
+                        <span className="text-xs text-slate-400">{v.snapshot?.length || 0} total</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button onClick={() => setViewVersion(v)} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">👁 Ver</button>
+                    {idx !== 0 && (
+                      <button onClick={() => restoreVersion(v)} disabled={restoring}
+                        className="px-3 py-1 text-xs border border-amber-200 text-amber-600 rounded-lg hover:bg-amber-50 disabled:opacity-50">
+                        ↩ Restaurar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
