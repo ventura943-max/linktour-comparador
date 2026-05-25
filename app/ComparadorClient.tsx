@@ -137,6 +137,119 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
     return feats.map((f: any, fi: number) => ({ ...f, catName: getName(cat, lang), catId: cat.id, isFirst: fi === 0 }))
   })
 
+  function exportComparador() {
+    const wb = XLSX.utils.book_new()
+
+    // Colores para el header
+    const headerStyle = {
+      fill: { fgColor: { rgb: '071225' } },
+      font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 9 },
+      alignment: { horizontal: 'center', vertical: 'center' },
+      border: { bottom: { style: 'thin', color: { rgb: '1a2f4a' } } }
+    }
+
+    // Construir datos
+    const aoa: any[][] = []
+
+    // Fila 1: MARCA
+    aoa.push(['', '', ...selectedModels.map((m: any) => m.brand.toUpperCase())])
+    // Fila 2: MODELO
+    aoa.push(['', '', ...selectedModels.map((m: any) => m.name.toUpperCase())])
+    // Fila 3: VERSION
+    aoa.push([t.cat.toUpperCase(), t.caracteristica.toUpperCase(), ...selectedModels.map((m: any) => m.version || m.name)])
+
+    // Filas de datos
+    filteredFeatures.forEach((feat: any) => {
+      const row: any[] = [
+        feat.isFirst ? feat.catName : '',
+        getName(feat, lang),
+        ...selectedModels.map((m: any) => {
+          const v = val(feat.id, m.id)
+          const lo = v.toLowerCase().trim()
+          if (lo === 'yes') return 'Sí'
+          if (lo === 'no') return 'No'
+          return v
+        })
+      ]
+      aoa.push(row)
+    })
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa)
+
+    // Anchos de columnas
+    ws['!cols'] = [
+      { wch: 20 },
+      { wch: 35 },
+      ...selectedModels.map(() => ({ wch: 22 }))
+    ]
+
+    // Altura de filas de cabecera
+    ws['!rows'] = [{ hpt: 18 }, { hpt: 18 }, { hpt: 20 }]
+
+    // Aplicar estilos a cabeceras
+    const totalCols = 2 + selectedModels.length
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < totalCols; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r, c })
+        if (!ws[cellRef]) ws[cellRef] = { v: '', t: 's' }
+        ws[cellRef].s = r < 2
+          ? { fill: { fgColor: { rgb: r === 0 ? '0d1e3a' : '14243a' } }, font: { color: { rgb: r === 0 ? '7aa4cc' : 'a8c4e8' }, bold: true, sz: 8 }, alignment: { horizontal: 'center' } }
+          : { fill: { fgColor: { rgb: '1c3050' } }, font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 9 }, alignment: { horizontal: 'center' } }
+      }
+      // Primeras 2 celdas siempre fondo oscuro
+      for (let c = 0; c < 2; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r, c })
+        if (!ws[cellRef]) ws[cellRef] = { v: '', t: 's' }
+        ws[cellRef].s = { fill: { fgColor: { rgb: '081224' } }, font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 9 } }
+      }
+    }
+
+    // Estilos para filas de datos
+    let dataRowIdx = 3
+    let lastCat = ''
+    filteredFeatures.forEach((feat: any) => {
+      const isCatChange = feat.isFirst
+      const bgCat = 'f8f9fa'
+      const bgNormal = 'FFFFFF'
+
+      // Columna categoria
+      const catCell = XLSX.utils.encode_cell({ r: dataRowIdx, c: 0 })
+      if (!ws[catCell]) ws[catCell] = { v: '', t: 's' }
+      ws[catCell].s = { fill: { fgColor: { rgb: bgCat } }, font: { bold: true, sz: 9, color: { rgb: '64748b' } }, border: isCatChange ? { top: { style: 'medium', color: { rgb: 'cbd5e1' } } } : {} }
+
+      // Columna caracteristica
+      const featCell = XLSX.utils.encode_cell({ r: dataRowIdx, c: 1 })
+      if (!ws[featCell]) ws[featCell] = { v: '', t: 's' }
+      ws[featCell].s = { fill: { fgColor: { rgb: bgNormal } }, font: { sz: 9 }, border: isCatChange ? { top: { style: 'medium', color: { rgb: 'cbd5e1' } } } : {} }
+
+      // Columnas de valores
+      selectedModels.forEach((_: any, mi: number) => {
+        const vCell = XLSX.utils.encode_cell({ r: dataRowIdx, c: 2 + mi })
+        if (!ws[vCell]) ws[vCell] = { v: '', t: 's' }
+        const v = ws[vCell].v
+        const lo = String(v).toLowerCase().trim()
+        let bg = bgNormal
+        let fontColor = '1e293b'
+        if (lo === 'sí' || lo === 'yes') { bg = 'f0fdf4'; fontColor = '166534' }
+        if (lo === 'no') { bg = 'fef2f2'; fontColor = '991b1b' }
+        ws[vCell].s = {
+          fill: { fgColor: { rgb: bg } },
+          font: { sz: 9, color: { rgb: fontColor }, bold: lo === 'sí' || lo === 'no' },
+          alignment: { horizontal: 'center' },
+          border: isCatChange ? { top: { style: 'medium', color: { rgb: 'cbd5e1' } } } : {}
+        }
+      })
+      dataRowIdx++
+    })
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Comparativa')
+
+    const fecha = new Date().toLocaleDateString('es-ES').replace(/\//g, '-')
+    const nombres = selectedModels.map((m: any) => m.version || m.name).join('_')
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true })
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `comparativa-${nombres}-${fecha}.xlsx`)
+  }
+
   return (
     <div>
       <h1 className="text-2xl md:text-3xl font-black tracking-tight mb-1">{t.comparadorTitle}</h1>
@@ -190,14 +303,22 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
           )}
         </div>
       </div>
+
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-3 gap-2">
         <h2 className="text-xl font-black tracking-tight">{t.fichaCompleta}</h2>
         <div className="flex items-center gap-2">
           <input type="text" placeholder={t.buscar} value={search} onChange={e => setSearch(e.target.value)}
             className="border border-slate-200 rounded-full px-3 py-2 text-sm outline-none focus:border-blue-400 flex-1 md:min-w-[200px]" />
           <span className="text-xs text-slate-400 whitespace-nowrap">{filteredFeatures.length} {t.espec}</span>
+          <button onClick={exportComparador}
+            title="Descargar Excel"
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-full transition whitespace-nowrap">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            Excel
+          </button>
         </div>
       </div>
+
       <div className="flex gap-2 flex-wrap mb-4">
         {[{ id: 'all', name: t.todo }, ...categories.map((c: any) => ({ ...c, name: getName(c, lang) }))].map((c: any) => (
           <button key={c.id} onClick={() => setActiveCat(c.id)}
@@ -206,6 +327,7 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
           </button>
         ))}
       </div>
+
       <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-x-auto">
         <table className="border-collapse text-xs" style={{ tableLayout: 'fixed', width: `${180 + selectedModels.length * 90}px`, minWidth: '100%' }}>
           <colgroup>
@@ -371,14 +493,9 @@ function Categorias({ t }: { t: T }) {
       const catFeats = features.filter(f => f.category_id === cat.id).sort((a, b) => a.sort_order - b.sort_order)
       catFeats.forEach(f => {
         rows.push({
-          'Categoría (EN)': cat.name,
-          'Categoría (ES)': cat.name_es || '',
-          'Categoría (IT)': cat.name_it || '',
-          'Característica (EN)': f.name,
-          'Característica (ES)': f.name_es || '',
-          'Característica (IT)': f.name_it || '',
-          'Tipo': f.type,
-          'Orden': f.sort_order,
+          'Categoría (EN)': cat.name, 'Categoría (ES)': cat.name_es || '', 'Categoría (IT)': cat.name_it || '',
+          'Característica (EN)': f.name, 'Característica (ES)': f.name_es || '', 'Característica (IT)': f.name_it || '',
+          'Tipo': f.type, 'Orden': f.sort_order,
         })
       })
     })
@@ -401,13 +518,10 @@ function Categorias({ t }: { t: T }) {
         const wb = XLSX.read(data, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows: any[] = XLSX.utils.sheet_to_json(ws)
-
-        // Snapshot del estado actual antes de importar
         const snapshot = features.map(f => {
           const cat = categories.find(c => c.id === f.category_id)
           return { category: cat?.name || '', feature: f.name, type: f.type, name_es: f.name_es, name_it: f.name_it }
         })
-
         let added = 0
         for (const row of rows) {
           const catNameEN = String(row['Categoría (EN)'] || '').trim()
@@ -421,27 +535,14 @@ function Categorias({ t }: { t: T }) {
           if (exists) continue
           const cat = categories.find(c => c.name.toLowerCase() === catNameEN.toLowerCase())
           if (!cat) continue
-          await supabase.from('features').insert({
-            name: featNameEN, name_es: name_es || null, name_it: name_it || null,
-            category_id: cat.id, type, sort_order
-          })
+          await supabase.from('features').insert({ name: featNameEN, name_es: name_es || null, name_it: name_it || null, category_id: cat.id, type, sort_order })
           added++
         }
-
-        // Guardar versión
-        await supabase.from('excel_versions').insert({
-          filename: file.name,
-          snapshot,
-          changes_added: added,
-          notes: uploadNote || null
-        })
-
+        await supabase.from('excel_versions').insert({ filename: file.name, snapshot, changes_added: added, notes: uploadNote || null })
         toast(`✓ ${added} características nuevas añadidas`)
         setUploadNote('')
         await loadAll()
-      } catch {
-        toast('Error al procesar el archivo')
-      }
+      } catch { toast('Error al procesar el archivo') }
       setImporting(false)
     }
     reader.readAsArrayBuffer(file)
@@ -449,26 +550,18 @@ function Categorias({ t }: { t: T }) {
   }
 
   async function restoreVersion(version: any) {
-    if (!confirm(`¿Restaurar al estado del ${formatDate(version.created_at)}? Se eliminarán todas las características actuales y se restaurarán las de esa versión.`)) return
+    if (!confirm(`¿Restaurar al estado del ${formatDate(version.created_at)}?`)) return
     setRestoring(true)
     try {
-      // Eliminar todas las características actuales
       await supabase.from('features').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-      // Restaurar desde snapshot
       for (const item of version.snapshot) {
         const cat = categories.find((c: any) => c.name === item.category)
         if (!cat) continue
-        await supabase.from('features').insert({
-          name: item.feature, type: item.type,
-          name_es: item.name_es || null, name_it: item.name_it || null,
-          category_id: cat.id, sort_order: 0
-        })
+        await supabase.from('features').insert({ name: item.feature, type: item.type, name_es: item.name_es || null, name_it: item.name_it || null, category_id: cat.id, sort_order: 0 })
       }
-      toast('✓ Versión restaurada correctamente')
+      toast('✓ Versión restaurada')
       await loadAll()
-    } catch {
-      toast('Error al restaurar')
-    }
+    } catch { toast('Error al restaurar') }
     setRestoring(false)
   }
 
@@ -477,15 +570,15 @@ function Categorias({ t }: { t: T }) {
     const snapB: any[] = vB.snapshot || []
     const namesA = new Set(snapA.map((x: any) => x.feature))
     const namesB = new Set(snapB.map((x: any) => x.feature))
-    const added = snapB.filter((x: any) => !namesA.has(x.feature))
-    const removed = snapA.filter((x: any) => !namesB.has(x.feature))
-    const kept = snapA.filter((x: any) => namesB.has(x.feature))
-    return { added, removed, kept }
+    return {
+      added: snapB.filter((x: any) => !namesA.has(x.feature)),
+      removed: snapA.filter((x: any) => !namesB.has(x.feature)),
+      kept: snapA.filter((x: any) => namesB.has(x.feature))
+    }
   }
 
   const ic = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
   const lc = "block text-xs font-bold text-slate-500 uppercase mb-1"
-
   const vA = versions.find(v => v.id === compareA)
   const vB = versions.find(v => v.id === compareB)
   const diff = vA && vB ? getDiff(vA, vB) : null
@@ -494,7 +587,6 @@ function Categorias({ t }: { t: T }) {
     <div>
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
 
-      {/* Modal ver versión */}
       {viewVersion && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
@@ -512,9 +604,7 @@ function Categorias({ t }: { t: T }) {
                 return (
                   <div key={cat.id} className="mb-4">
                     <div className="text-xs font-black text-slate-400 uppercase tracking-wider py-1 border-b border-slate-100 mb-2">{cat.name}</div>
-                    {catItems.map((x: any, i: number) => (
-                      <div key={i} className="text-sm text-slate-700 py-1 border-b border-slate-50">{x.feature}</div>
-                    ))}
+                    {catItems.map((x: any, i: number) => <div key={i} className="text-sm text-slate-700 py-1 border-b border-slate-50">{x.feature}</div>)}
                   </div>
                 )
               })}
@@ -523,7 +613,6 @@ function Categorias({ t }: { t: T }) {
         </div>
       )}
 
-      {/* Modal comparar */}
       {showCompare && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col">
@@ -533,43 +622,29 @@ function Categorias({ t }: { t: T }) {
             </div>
             <div className="p-6 border-b border-slate-100">
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className={lc}>Versión A (base)</label>
+                <div><label className={lc}>Versión A (base)</label>
                   <select className={ic} value={compareA} onChange={e => setCompareA(e.target.value)}>
                     <option value="">Selecciona...</option>
                     {versions.map(v => <option key={v.id} value={v.id}>{formatDate(v.created_at)} — {v.filename}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={lc}>Versión B (nueva)</label>
+                  </select></div>
+                <div><label className={lc}>Versión B (nueva)</label>
                   <select className={ic} value={compareB} onChange={e => setCompareB(e.target.value)}>
                     <option value="">Selecciona...</option>
                     {versions.filter(v => v.id !== compareA).map(v => <option key={v.id} value={v.id}>{formatDate(v.created_at)} — {v.filename}</option>)}
-                  </select>
-                </div>
+                  </select></div>
               </div>
             </div>
             {diff && (
               <div className="overflow-y-auto p-6 space-y-4">
-                {diff.added.length > 0 && (
-                  <div>
-                    <div className="text-xs font-black text-emerald-600 uppercase tracking-wider mb-2">✓ Añadidas en B ({diff.added.length})</div>
-                    {diff.added.map((x: any, i: number) => (
-                      <div key={i} className="text-sm text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg mb-1">{x.category} → {x.feature}</div>
-                    ))}
-                  </div>
-                )}
-                {diff.removed.length > 0 && (
-                  <div>
-                    <div className="text-xs font-black text-red-500 uppercase tracking-wider mb-2">✗ Eliminadas en B ({diff.removed.length})</div>
-                    {diff.removed.map((x: any, i: number) => (
-                      <div key={i} className="text-sm text-red-600 bg-red-50 px-3 py-1.5 rounded-lg mb-1">{x.category} → {x.feature}</div>
-                    ))}
-                  </div>
-                )}
-                {diff.added.length === 0 && diff.removed.length === 0 && (
-                  <div className="text-center text-slate-400 py-6">Las dos versiones son idénticas</div>
-                )}
+                {diff.added.length > 0 && <div>
+                  <div className="text-xs font-black text-emerald-600 uppercase tracking-wider mb-2">✓ Añadidas en B ({diff.added.length})</div>
+                  {diff.added.map((x: any, i: number) => <div key={i} className="text-sm text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg mb-1">{x.category} → {x.feature}</div>)}
+                </div>}
+                {diff.removed.length > 0 && <div>
+                  <div className="text-xs font-black text-red-500 uppercase tracking-wider mb-2">✗ Eliminadas en B ({diff.removed.length})</div>
+                  {diff.removed.map((x: any, i: number) => <div key={i} className="text-sm text-red-600 bg-red-50 px-3 py-1.5 rounded-lg mb-1">{x.category} → {x.feature}</div>)}
+                </div>}
+                {diff.added.length === 0 && diff.removed.length === 0 && <div className="text-center text-slate-400 py-6">Las dos versiones son idénticas</div>}
                 <div className="text-xs text-slate-400">{diff.kept.length} características sin cambios</div>
               </div>
             )}
@@ -592,7 +667,6 @@ function Categorias({ t }: { t: T }) {
         </div>
       </div>
 
-      {/* Nota para importación */}
       <div className="bg-white rounded-xl border border-slate-100 px-4 py-3 mb-4 flex items-center gap-3">
         <span className="text-xs font-bold text-slate-400 uppercase whitespace-nowrap">Nota (opcional)</span>
         <input className="flex-1 text-sm outline-none text-slate-600" placeholder="Ej: Añadidas características de conectividad v2..." value={uploadNote} onChange={e => setUploadNote(e.target.value)} />
@@ -750,25 +824,18 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
   const segments: string[] = segmentFeat
     ? Array.from(new Set<string>(values.filter((v: any) => v.feature_id === segmentFeat.id && v.value).map((v: any) => String(v.value)))).sort()
     : []
-
   const modelsInSegment = segment && segmentFeat
     ? models.filter((m: any) => values.find((v: any) => v.feature_id === segmentFeat.id && v.model_id === m.id && v.value === segment))
     : models
-
   const model1 = modelsInSegment.find((m: any) => m.id === model1Id)
   const model2 = modelsInSegment.find((m: any) => m.id === model2Id)
-
   useEffect(() => { setModel1Id(''); setModel2Id(''); setAnalysis(''); setError('') }, [segment])
 
   async function generate() {
     if (!model1 || !model2) return
     setLoading(true); setAnalysis(''); setError('')
     try {
-      const res = await fetch('/api/analisis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model1, model2, features, values, categories, lang })
-      })
+      const res = await fetch('/api/analisis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model1, model2, features, values, categories, lang }) })
       const data = await res.json()
       if (data.error) throw new Error(data.error)
       setAnalysis(data.analysis)
@@ -793,9 +860,7 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
         <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-3">Segmento</label>
         <div className="flex gap-3 flex-wrap">
           <button onClick={() => setSegment('')} className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${!segment ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>Todos</button>
-          {segments.map(seg => (
-            <button key={seg} onClick={() => setSegment(seg)} className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${segment === seg ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>{seg}</button>
-          ))}
+          {segments.map(seg => <button key={seg} onClick={() => setSegment(seg)} className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${segment === seg ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>{seg}</button>)}
         </div>
         {segment && <p className="text-xs text-slate-400 mt-2">{modelsInSegment.length} vehículos en el segmento {segment}</p>}
       </div>
@@ -805,9 +870,7 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
             <label className="block text-xs font-bold text-slate-500 uppercase mb-2">{label}</label>
             <select value={value} onChange={e => set(e.target.value)} className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-400 bg-white">
               <option value="">Selecciona un vehículo...</option>
-              {modelsInSegment.filter((m: any) => m.id !== other).map((m: any) => (
-                <option key={m.id} value={m.id}>{m.brand} {m.name} {m.version}</option>
-              ))}
+              {modelsInSegment.filter((m: any) => m.id !== other).map((m: any) => <option key={m.id} value={m.id}>{m.brand} {m.name} {m.version}</option>)}
             </select>
           </div>
         ))}
@@ -857,32 +920,24 @@ function Configuracion({ features }: { features: any[] }) {
   const dragIdx = useRef<number | null>(null)
 
   useEffect(() => { loadFields() }, [])
-
   async function loadFields() {
     const { data } = await supabase.from('settings').select('*').eq('id', 'card_fields').single()
     if (data) setFields(data.value)
   }
-
   function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 3000) }
-
   async function save(updated: any[]) {
     await supabase.from('settings').upsert({ id: 'card_fields', value: updated })
-    setFields(updated)
-    toast('Guardado ✓')
+    setFields(updated); toast('Guardado ✓')
   }
-
   function toggleField(idx: number) { save(fields.map((f, i) => i === idx ? { ...f, enabled: !f.enabled } : f)) }
   function updateLabel(idx: number, label: string) { setFields(fields.map((f, i) => i === idx ? { ...f, label } : f)) }
   function saveLabel() { save(fields) }
   function removeField(idx: number) { save(fields.filter((_, i) => i !== idx)) }
-
   function addField() {
     if (!newField.feature_name || !newField.label) return
     save([...fields, { ...newField, enabled: true, order: fields.length + 1 }])
-    setNewField({ feature_name: '', label: '' })
-    setShowAdd(false)
+    setNewField({ feature_name: '', label: '' }); setShowAdd(false)
   }
-
   function onDragStart(idx: number) { dragIdx.current = idx }
   function onDragOver(e: React.DragEvent, idx: number) {
     e.preventDefault()
@@ -894,9 +949,7 @@ function Configuracion({ features }: { features: any[] }) {
     setFields(updated.map((f, i) => ({ ...f, order: i + 1 })))
   }
   function onDragEnd() { save(fields); dragIdx.current = null }
-
   const ic = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
-
   return (
     <div>
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
@@ -933,9 +986,7 @@ function Configuracion({ features }: { features: any[] }) {
               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Característica</label>
               <select className={ic} value={newField.feature_name} onChange={e => setNewField({ ...newField, feature_name: e.target.value })}>
                 <option value="">Selecciona...</option>
-                {features.filter(f => !fields.find(cf => cf.feature_name === f.name)).map(f => (
-                  <option key={f.id} value={f.name}>{f.name}</option>
-                ))}
+                {features.filter(f => !fields.find(cf => cf.feature_name === f.name)).map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
               </select>
             </div>
             <div>
@@ -945,14 +996,11 @@ function Configuracion({ features }: { features: any[] }) {
           </div>
           <div className="flex gap-2">
             <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-500">Cancelar</button>
-            <button onClick={addField} disabled={!newField.feature_name || !newField.label}
-              className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg disabled:opacity-40">Añadir</button>
+            <button onClick={addField} disabled={!newField.feature_name || !newField.label} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg disabled:opacity-40">Añadir</button>
           </div>
         </div>
       ) : (
-        <button onClick={() => setShowAdd(true)} className="w-full border-2 border-dashed border-slate-200 rounded-2xl py-4 text-sm font-bold text-slate-400 hover:border-blue-300 hover:text-blue-500 hover:bg-blue-50 transition">
-          + Añadir campo
-        </button>
+        <button onClick={() => setShowAdd(true)} className="w-full border-2 border-dashed border-slate-200 rounded-2xl py-4 text-sm font-bold text-slate-400 hover:border-blue-300 hover:text-blue-500 hover:bg-blue-50 transition">+ Añadir campo</button>
       )}
     </div>
   )
@@ -973,17 +1021,10 @@ export default function ComparadorClient({ models, categories, features, values 
   ])
 
   useEffect(() => {
-    supabase.from('settings').select('*').eq('id', 'card_fields').single().then(({ data }) => {
-      if (data) setCardFields(data.value)
-    })
+    supabase.from('settings').select('*').eq('id', 'card_fields').single().then(({ data }) => { if (data) setCardFields(data.value) })
   }, [])
-
   useEffect(() => {
-    if (active === 'comparador') {
-      supabase.from('settings').select('*').eq('id', 'card_fields').single().then(({ data }) => {
-        if (data) setCardFields(data.value)
-      })
-    }
+    if (active === 'comparador') supabase.from('settings').select('*').eq('id', 'card_fields').single().then(({ data }) => { if (data) setCardFields(data.value) })
   }, [active])
 
   const t = translations[lang]
