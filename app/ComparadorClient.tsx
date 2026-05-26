@@ -755,7 +755,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
   }
 
   const precioBase = parseFloat(model1?.price?.replace(/[^0-9.]/g, '') || '0')
-  const ajusteTotal = diffRows.reduce((sum, feat) => sum + calcAjuste(feat), 0)
+  const ajusteTotal = diffRows.reduce((sum: number, feat: any) => sum + calcAjuste(feat), 0)
   const precioEstimado = precioBase - ajusteTotal // precio del competidor estimado
 
   async function saveValorItems() {
