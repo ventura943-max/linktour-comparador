@@ -772,7 +772,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
     if (!model1 || !model2) return
     setLoading(true); setAnalysis(''); setError('')
     try {
-      const ajustes = diffRows.map(feat => ({
+      const ajustes = diffRows.map((feat: any) => ({
         caracteristica: feat.name,
         valor_m1: getVal(feat.id, model1.id),
         valor_m2: getVal(feat.id, model2.id),
