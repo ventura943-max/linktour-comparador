@@ -670,6 +670,8 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
   const [model1Id, setModel1Id] = useState('')
   const [model2Id, setModel2Id] = useState('')
   const [valorItems, setValorItems] = useState<Record<string, number>>({})
+  // signoItems: 1 = positivo (LIUX mejor), -1 = negativo (competidor mejor), 0 = auto
+  const [signoItems, setSignoItems] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [analysis, setAnalysis] = useState('')
@@ -703,20 +705,49 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
     return v ? v.value : '—'
   }
 
-  function valuesAreDifferent(featId: string) {
+  // Detecta si el sistema puede calcular el signo automáticamente
+  function canAutoSign(feat: any): boolean {
     if (!model1 || !model2) return false
-    const v1 = getVal(featId, model1.id)
-    const v2 = getVal(featId, model2.id)
-    return v1 !== v2
-  }
-
-  function isDifferentNumeric(v1: string, v2: string) {
+    const v1 = getVal(feat.id, model1.id).toLowerCase().trim()
+    const v2 = getVal(feat.id, model2.id).toLowerCase().trim()
+    const isBoolean = (v: string) => v === 'yes' || v === 'no' || v === 'sí' || v === 'si'
+    if (isBoolean(v1) || isBoolean(v2)) return true
     const n1 = parseFloat(v1)
     const n2 = parseFloat(v2)
-    return !isNaN(n1) && !isNaN(n2) && n1 !== n2
+    if (!isNaN(n1) && !isNaN(n2)) return true
+    return false
   }
 
-  // Filas diferenciales — solo las que son distintas entre los dos vehículos
+  function calcAjuste(feat: any): number {
+    if (!model1 || !model2) return 0
+    const v1 = getVal(feat.id, model1.id).toLowerCase().trim()
+    const v2 = getVal(feat.id, model2.id).toLowerCase().trim()
+    const valor = valorItems[feat.id] || 0
+    if (valor === 0) return 0
+
+    // Si el usuario ha especificado el signo manualmente
+    const signoManual = signoItems[feat.id]
+    if (signoManual !== undefined && signoManual !== 0) {
+      return signoManual * valor
+    }
+
+    // Auto para booleanos
+    const v1Yes = v1 === 'yes' || v1 === 'sí' || v1 === 'si'
+    const v2Yes = v2 === 'yes' || v2 === 'sí' || v2 === 'si'
+    if (v1Yes && !v2Yes) return +valor
+    if (!v1Yes && v2Yes) return -valor
+
+    // Auto para numéricos
+    const n1 = parseFloat(getVal(feat.id, model1.id))
+    const n2 = parseFloat(getVal(feat.id, model2.id))
+    if (!isNaN(n1) && !isNaN(n2)) {
+      if (n1 > n2) return +valor
+      if (n1 < n2) return -valor
+    }
+
+    return 0
+  }
+
   const diffRows = model1 && model2 ? categories.flatMap((cat: any) => {
     const feats = features.filter((f: any) => f.category_id === cat.id)
     const diffs = feats.filter((f: any) => {
@@ -729,34 +760,9 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
     return diffs.map((f: any, fi: number) => ({ ...f, catName: getName(cat, lang), isFirst: fi === 0 }))
   }) : []
 
-  // Calcular ajuste por fila
-  function calcAjuste(feat: any): number {
-    if (!model1 || !model2) return 0
-    const v1 = getVal(feat.id, model1.id).toLowerCase().trim()
-    const v2 = getVal(feat.id, model2.id).toLowerCase().trim()
-    const valor = valorItems[feat.id] || 0
-    if (valor === 0) return 0
-
-    // Para booleanos: si m1 (LIUX) tiene Sí y m2 no → suma; si m2 tiene Sí y m1 no → resta
-    const v1Yes = v1 === 'yes' || v1 === 'sí' || v1 === 'si'
-    const v2Yes = v2 === 'yes' || v2 === 'sí' || v2 === 'si'
-    if (v1Yes && !v2Yes) return +valor  // LIUX lo tiene, competidor no → LIUX vale más
-    if (!v1Yes && v2Yes) return -valor  // Competidor lo tiene, LIUX no → resta al LIUX
-
-    // Para numéricos: si m1 > m2 → suma proporcional; si m1 < m2 → resta
-    const n1 = parseFloat(getVal(feat.id, model1.id))
-    const n2 = parseFloat(getVal(feat.id, model2.id))
-    if (!isNaN(n1) && !isNaN(n2)) {
-      if (n1 > n2) return +valor
-      if (n1 < n2) return -valor
-    }
-
-    return 0
-  }
-
   const precioBase = parseFloat(model1?.price?.replace(/[^0-9.]/g, '') || '0')
   const ajusteTotal = diffRows.reduce((sum: number, feat: any) => sum + calcAjuste(feat), 0)
-  const precioEstimado = precioBase - ajusteTotal // precio del competidor estimado
+  const precioEstimado = precioBase - ajusteTotal
 
   async function saveValorItems() {
     setSaving(true)
@@ -782,10 +788,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
       const res = await fetch('/api/valor-cliente', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model1, model2, ajustes,
-          precioBase, ajusteTotal, precioEstimado, lang
-        })
+        body: JSON.stringify({ model1, model2, ajustes, precioBase, ajusteTotal, precioEstimado, lang })
       })
       const data = await res.json()
       if (data.error) throw new Error(data.error)
@@ -819,7 +822,6 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
         )}
       </div>
 
-      {/* SELECTOR SEGMENTO */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-6 shadow-sm mt-6">
         <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-3">Segmento</label>
         <div className="flex gap-3 flex-wrap">
@@ -828,7 +830,6 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
         </div>
       </div>
 
-      {/* SELECTOR VEHÍCULOS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         {[
           { label: 'Vehículo propio (LIUX)', value: model1Id, set: setModel1Id, other: model2Id, color: 'border-blue-200 bg-blue-50' },
@@ -844,7 +845,6 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
         ))}
       </div>
 
-      {/* PREVIEW VEHÍCULOS */}
       {model1 && model2 && (
         <div className="grid grid-cols-2 gap-4 mb-6">
           {[
@@ -866,7 +866,6 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
         </div>
       )}
 
-      {/* TABLA DIFERENCIAS CON VALORES */}
       {model1 && model2 && (
         <>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-x-auto mb-4">
@@ -880,7 +879,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
                 <col style={{ width: '180px' }} />
                 <col style={{ width: '100px' }} />
                 <col style={{ width: '100px' }} />
-                <col style={{ width: '110px' }} />
+                <col style={{ width: '140px' }} />
               </colgroup>
               <thead>
                 <tr>
@@ -896,8 +895,8 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
                   const v1 = getVal(feat.id, model1.id)
                   const v2 = getVal(feat.id, model2.id)
                   const ajuste = calcAjuste(feat)
-                  const lo1 = v1.toLowerCase().trim()
-                  const lo2 = v2.toLowerCase().trim()
+                  const autoSign = canAutoSign(feat)
+                  const signoManual = signoItems[feat.id]
                   const display = (v: string) => { const lo = v.toLowerCase().trim(); if (lo === 'yes') return '✓'; if (lo === 'no') return '✗'; return v }
                   const cls = (v: string) => { const lo = v.toLowerCase().trim(); if (lo === 'yes') return 'text-emerald-700 bg-emerald-50 font-black'; if (lo === 'no') return 'text-red-600 bg-red-50 font-black'; if (lo === 'n/a') return 'text-slate-400'; return '' }
                   return (
@@ -906,8 +905,21 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
                       <td className="border border-slate-100 px-2 py-2 text-[9px] text-slate-700">{getName(feat, lang)}</td>
                       <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${cls(v1)}`}>{display(v1)}</td>
                       <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${cls(v2)}`}>{display(v2)}</td>
-                      <td className="border border-slate-100 px-2 py-1.5 text-center">
+                      <td className="border border-slate-100 px-2 py-1.5">
                         <div className="flex items-center justify-center gap-1">
+                          {/* Selector de signo — solo aparece cuando no se puede calcular automáticamente */}
+                          {!autoSign && (
+                            <div className="flex rounded-lg overflow-hidden border border-slate-200 text-[9px] font-black">
+                              <button
+                                onClick={() => setSignoItems(prev => ({ ...prev, [feat.id]: signoManual === 1 ? 0 : 1 }))}
+                                className={`px-1.5 py-1 transition ${signoManual === 1 ? 'bg-emerald-500 text-white' : 'bg-white text-slate-400 hover:bg-emerald-50'}`}
+                                title="LIUX es mejor en esta característica">+</button>
+                              <button
+                                onClick={() => setSignoItems(prev => ({ ...prev, [feat.id]: signoManual === -1 ? 0 : -1 }))}
+                                className={`px-1.5 py-1 transition border-l border-slate-200 ${signoManual === -1 ? 'bg-red-500 text-white' : 'bg-white text-slate-400 hover:bg-red-50'}`}
+                                title="Competidor es mejor en esta característica">−</button>
+                            </div>
+                          )}
                           <input
                             type="number"
                             value={valorItems[feat.id] ?? 0}
@@ -915,7 +927,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
                             className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center outline-none focus:border-blue-400"
                           />
                           {ajuste !== 0 && (
-                            <span className={`text-[9px] font-black ${ajuste > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            <span className={`text-[9px] font-black whitespace-nowrap ${ajuste > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                               {ajuste > 0 ? '+' : ''}{ajuste}€
                             </span>
                           )}
@@ -928,7 +940,6 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
             </table>
           </div>
 
-          {/* RESUMEN */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-6">
             <h3 className="font-black text-base mb-4 text-slate-700 uppercase tracking-wider">Resumen Valor Cliente</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
@@ -941,9 +952,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
                 <div className={`text-2xl font-black ${ajusteTotal >= 0 ? 'text-emerald-900' : 'text-red-900'}`}>
                   {ajusteTotal >= 0 ? '+' : ''}{ajusteTotal.toLocaleString('es-ES')}€
                 </div>
-                <div className="text-[10px] text-slate-500 mt-1">
-                  {ajusteTotal >= 0 ? `LIUX aporta más valor` : `Competidor aporta más valor`}
-                </div>
+                <div className="text-[10px] text-slate-500 mt-1">{ajusteTotal >= 0 ? 'LIUX aporta más valor' : 'Competidor aporta más valor'}</div>
               </div>
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
                 <div className="text-xs font-black text-amber-600 uppercase mb-1">Precio justo estimado {model2.brand} {model2.version}</div>
@@ -960,7 +969,6 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
             )}
           </div>
 
-          {/* BOTÓN ANÁLISIS IA */}
           <button onClick={generateAnalysis} disabled={loading || diffRows.length === 0}
             className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-40 text-sm mb-6 flex items-center justify-center gap-2">
             {loading ? (<><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>Generando análisis...</>) : '✦ Generar argumento comercial con IA'}
@@ -980,13 +988,13 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
         </>
       )}
 
-      {!model1 || !model2 ? (
+      {(!model1 || !model2) && (
         <div className="text-center py-16 text-slate-400">
           <div className="text-5xl mb-4">⚖️</div>
           <div className="font-bold text-base mb-1">Selecciona dos vehículos para comenzar</div>
           <div className="text-sm">El módulo calculará el precio justo de mercado del competidor</div>
         </div>
-      ) : null}
+      )}
     </div>
   )
 }
