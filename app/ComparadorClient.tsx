@@ -9,6 +9,7 @@ const IconComparador = () => <svg width="18" height="18" viewBox="0 0 24 24" fil
 const IconModelos = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 17H5a2 2 0 01-2-2V7l3-4h12l3 4v8a2 2 0 01-2 2z"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg>
 const IconCategorias = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h7"/></svg>
 const IconAnalisis = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+const IconValor = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
 const IconConfig = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
 const IconLogout = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
 const IconChevron = ({ collapsed }: { collapsed: boolean }) => (
@@ -41,6 +42,7 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
     { id: 'modelos', label: t.modelos, icon: <IconModelos /> },
     { id: 'categorias', label: t.categorias, icon: <IconCategorias /> },
     { id: 'analisis', label: t.analisis, icon: <IconAnalisis /> },
+    { id: 'valor', label: 'Valor Cliente', icon: <IconValor /> },
     { id: 'config', label: 'Configuración', icon: <IconConfig /> },
   ]
   const w = collapsed ? 'w-16' : 'w-56'
@@ -138,29 +140,12 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   })
 
   function exportComparador() {
-    const wb = XLSX.utils.book_new()
-
-    // Colores para el header
-    const headerStyle = {
-      fill: { fgColor: { rgb: '071225' } },
-      font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 9 },
-      alignment: { horizontal: 'center', vertical: 'center' },
-      border: { bottom: { style: 'thin', color: { rgb: '1a2f4a' } } }
-    }
-
-    // Construir datos
     const aoa: any[][] = []
-
-    // Fila 1: MARCA
     aoa.push(['', '', ...selectedModels.map((m: any) => m.brand.toUpperCase())])
-    // Fila 2: MODELO
     aoa.push(['', '', ...selectedModels.map((m: any) => m.name.toUpperCase())])
-    // Fila 3: VERSION
     aoa.push([t.cat.toUpperCase(), t.caracteristica.toUpperCase(), ...selectedModels.map((m: any) => m.version || m.name)])
-
-    // Filas de datos
     filteredFeatures.forEach((feat: any) => {
-      const row: any[] = [
+      aoa.push([
         feat.isFirst ? feat.catName : '',
         getName(feat, lang),
         ...selectedModels.map((m: any) => {
@@ -170,80 +155,12 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
           if (lo === 'no') return 'No'
           return v
         })
-      ]
-      aoa.push(row)
+      ])
     })
-
     const ws = XLSX.utils.aoa_to_sheet(aoa)
-
-    // Anchos de columnas
-    ws['!cols'] = [
-      { wch: 20 },
-      { wch: 35 },
-      ...selectedModels.map(() => ({ wch: 22 }))
-    ]
-
-    // Altura de filas de cabecera
-    ws['!rows'] = [{ hpt: 18 }, { hpt: 18 }, { hpt: 20 }]
-
-    // Aplicar estilos a cabeceras
-    const totalCols = 2 + selectedModels.length
-    for (let r = 0; r < 3; r++) {
-      for (let c = 0; c < totalCols; c++) {
-        const cellRef = XLSX.utils.encode_cell({ r, c })
-        if (!ws[cellRef]) ws[cellRef] = { v: '', t: 's' }
-        ws[cellRef].s = r < 2
-          ? { fill: { fgColor: { rgb: r === 0 ? '0d1e3a' : '14243a' } }, font: { color: { rgb: r === 0 ? '7aa4cc' : 'a8c4e8' }, bold: true, sz: 8 }, alignment: { horizontal: 'center' } }
-          : { fill: { fgColor: { rgb: '1c3050' } }, font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 9 }, alignment: { horizontal: 'center' } }
-      }
-      // Primeras 2 celdas siempre fondo oscuro
-      for (let c = 0; c < 2; c++) {
-        const cellRef = XLSX.utils.encode_cell({ r, c })
-        if (!ws[cellRef]) ws[cellRef] = { v: '', t: 's' }
-        ws[cellRef].s = { fill: { fgColor: { rgb: '081224' } }, font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 9 } }
-      }
-    }
-
-    // Estilos para filas de datos
-    let dataRowIdx = 3
-    let lastCat = ''
-    filteredFeatures.forEach((feat: any) => {
-      const isCatChange = feat.isFirst
-      const bgCat = 'f8f9fa'
-      const bgNormal = 'FFFFFF'
-
-      // Columna categoria
-      const catCell = XLSX.utils.encode_cell({ r: dataRowIdx, c: 0 })
-      if (!ws[catCell]) ws[catCell] = { v: '', t: 's' }
-      ws[catCell].s = { fill: { fgColor: { rgb: bgCat } }, font: { bold: true, sz: 9, color: { rgb: '64748b' } }, border: isCatChange ? { top: { style: 'medium', color: { rgb: 'cbd5e1' } } } : {} }
-
-      // Columna caracteristica
-      const featCell = XLSX.utils.encode_cell({ r: dataRowIdx, c: 1 })
-      if (!ws[featCell]) ws[featCell] = { v: '', t: 's' }
-      ws[featCell].s = { fill: { fgColor: { rgb: bgNormal } }, font: { sz: 9 }, border: isCatChange ? { top: { style: 'medium', color: { rgb: 'cbd5e1' } } } : {} }
-
-      // Columnas de valores
-      selectedModels.forEach((_: any, mi: number) => {
-        const vCell = XLSX.utils.encode_cell({ r: dataRowIdx, c: 2 + mi })
-        if (!ws[vCell]) ws[vCell] = { v: '', t: 's' }
-        const v = ws[vCell].v
-        const lo = String(v).toLowerCase().trim()
-        let bg = bgNormal
-        let fontColor = '1e293b'
-        if (lo === 'sí' || lo === 'yes') { bg = 'f0fdf4'; fontColor = '166534' }
-        if (lo === 'no') { bg = 'fef2f2'; fontColor = '991b1b' }
-        ws[vCell].s = {
-          fill: { fgColor: { rgb: bg } },
-          font: { sz: 9, color: { rgb: fontColor }, bold: lo === 'sí' || lo === 'no' },
-          alignment: { horizontal: 'center' },
-          border: isCatChange ? { top: { style: 'medium', color: { rgb: 'cbd5e1' } } } : {}
-        }
-      })
-      dataRowIdx++
-    })
-
+    ws['!cols'] = [{ wch: 20 }, { wch: 35 }, ...selectedModels.map(() => ({ wch: 22 }))]
+    const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Comparativa')
-
     const fecha = new Date().toLocaleDateString('es-ES').replace(/\//g, '-')
     const nombres = selectedModels.map((m: any) => m.version || m.name).join('_')
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true })
@@ -303,22 +220,19 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
           )}
         </div>
       </div>
-
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-3 gap-2">
         <h2 className="text-xl font-black tracking-tight">{t.fichaCompleta}</h2>
         <div className="flex items-center gap-2">
           <input type="text" placeholder={t.buscar} value={search} onChange={e => setSearch(e.target.value)}
             className="border border-slate-200 rounded-full px-3 py-2 text-sm outline-none focus:border-blue-400 flex-1 md:min-w-[200px]" />
           <span className="text-xs text-slate-400 whitespace-nowrap">{filteredFeatures.length} {t.espec}</span>
-          <button onClick={exportComparador}
-            title="Descargar Excel"
+          <button onClick={exportComparador} title="Descargar Excel"
             className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-full transition whitespace-nowrap">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
             Excel
           </button>
         </div>
       </div>
-
       <div className="flex gap-2 flex-wrap mb-4">
         {[{ id: 'all', name: t.todo }, ...categories.map((c: any) => ({ ...c, name: getName(c, lang) }))].map((c: any) => (
           <button key={c.id} onClick={() => setActiveCat(c.id)}
@@ -327,7 +241,6 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
           </button>
         ))}
       </div>
-
       <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-x-auto">
         <table className="border-collapse text-xs" style={{ tableLayout: 'fixed', width: `${180 + selectedModels.length * 90}px`, minWidth: '100%' }}>
           <colgroup>
@@ -449,7 +362,6 @@ function Categorias({ t }: { t: T }) {
   const [restoring, setRestoring] = useState(false)
 
   useEffect(() => { loadAll() }, [])
-
   async function loadAll() {
     const [c, f, v] = await Promise.all([
       supabase.from('categories').select('*').order('sort_order'),
@@ -460,9 +372,7 @@ function Categorias({ t }: { t: T }) {
     setFeatures(f.data || [])
     setVersions(v.data || [])
   }
-
   function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 4000) }
-
   async function saveCat() {
     if (!catForm.name) { toast(t.nombreObligatorio); return }
     if (editCatId) await supabase.from('categories').update(catForm).eq('id', editCatId)
@@ -485,13 +395,11 @@ function Categorias({ t }: { t: T }) {
     await supabase.from('features').delete().eq('id', id)
     toast(t.eliminado); loadAll()
   }
-
   function exportExcel() {
     const sortedCats = [...categories].sort((a, b) => a.sort_order - b.sort_order)
     const rows: any[] = []
     sortedCats.forEach(cat => {
-      const catFeats = features.filter(f => f.category_id === cat.id).sort((a, b) => a.sort_order - b.sort_order)
-      catFeats.forEach(f => {
+      features.filter(f => f.category_id === cat.id).sort((a, b) => a.sort_order - b.sort_order).forEach(f => {
         rows.push({
           'Categoría (EN)': cat.name, 'Categoría (ES)': cat.name_es || '', 'Categoría (IT)': cat.name_it || '',
           'Característica (EN)': f.name, 'Característica (ES)': f.name_es || '', 'Característica (IT)': f.name_it || '',
@@ -503,10 +411,8 @@ function Categorias({ t }: { t: T }) {
     ws['!cols'] = [{ wch: 25 }, { wch: 25 }, { wch: 25 }, { wch: 40 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 8 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Características')
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
-    saveAs(new Blob([buf], { type: 'application/octet-stream' }), 'caracteristicas-liux.xlsx')
+    saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/octet-stream' }), 'caracteristicas-liux.xlsx')
   }
-
   async function importExcel(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -516,39 +422,27 @@ function Categorias({ t }: { t: T }) {
       try {
         const data = new Uint8Array(ev.target?.result as ArrayBuffer)
         const wb = XLSX.read(data, { type: 'array' })
-        const ws = wb.Sheets[wb.SheetNames[0]]
-        const rows: any[] = XLSX.utils.sheet_to_json(ws)
-        const snapshot = features.map(f => {
-          const cat = categories.find(c => c.id === f.category_id)
-          return { category: cat?.name || '', feature: f.name, type: f.type, name_es: f.name_es, name_it: f.name_it }
-        })
+        const rows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]])
+        const snapshot = features.map(f => { const cat = categories.find(c => c.id === f.category_id); return { category: cat?.name || '', feature: f.name, type: f.type, name_es: f.name_es, name_it: f.name_it } })
         let added = 0
         for (const row of rows) {
           const catNameEN = String(row['Categoría (EN)'] || '').trim()
           const featNameEN = String(row['Característica (EN)'] || '').trim()
-          const type = String(row['Tipo'] || 'text').trim()
-          const sort_order = parseInt(row['Orden'] || '0')
-          const name_es = String(row['Característica (ES)'] || '').trim()
-          const name_it = String(row['Característica (IT)'] || '').trim()
           if (!catNameEN || !featNameEN) continue
-          const exists = features.find(f => f.name.toLowerCase() === featNameEN.toLowerCase())
-          if (exists) continue
+          if (features.find(f => f.name.toLowerCase() === featNameEN.toLowerCase())) continue
           const cat = categories.find(c => c.name.toLowerCase() === catNameEN.toLowerCase())
           if (!cat) continue
-          await supabase.from('features').insert({ name: featNameEN, name_es: name_es || null, name_it: name_it || null, category_id: cat.id, type, sort_order })
+          await supabase.from('features').insert({ name: featNameEN, name_es: String(row['Característica (ES)'] || '').trim() || null, name_it: String(row['Característica (IT)'] || '').trim() || null, category_id: cat.id, type: String(row['Tipo'] || 'text').trim(), sort_order: parseInt(row['Orden'] || '0') })
           added++
         }
         await supabase.from('excel_versions').insert({ filename: file.name, snapshot, changes_added: added, notes: uploadNote || null })
         toast(`✓ ${added} características nuevas añadidas`)
-        setUploadNote('')
-        await loadAll()
+        setUploadNote(''); await loadAll()
       } catch { toast('Error al procesar el archivo') }
       setImporting(false)
     }
-    reader.readAsArrayBuffer(file)
-    e.target.value = ''
+    reader.readAsArrayBuffer(file); e.target.value = ''
   }
-
   async function restoreVersion(version: any) {
     if (!confirm(`¿Restaurar al estado del ${formatDate(version.created_at)}?`)) return
     setRestoring(true)
@@ -559,24 +453,15 @@ function Categorias({ t }: { t: T }) {
         if (!cat) continue
         await supabase.from('features').insert({ name: item.feature, type: item.type, name_es: item.name_es || null, name_it: item.name_it || null, category_id: cat.id, sort_order: 0 })
       }
-      toast('✓ Versión restaurada')
-      await loadAll()
+      toast('✓ Versión restaurada'); await loadAll()
     } catch { toast('Error al restaurar') }
     setRestoring(false)
   }
-
   function getDiff(vA: any, vB: any) {
-    const snapA: any[] = vA.snapshot || []
-    const snapB: any[] = vB.snapshot || []
-    const namesA = new Set(snapA.map((x: any) => x.feature))
-    const namesB = new Set(snapB.map((x: any) => x.feature))
-    return {
-      added: snapB.filter((x: any) => !namesA.has(x.feature)),
-      removed: snapA.filter((x: any) => !namesB.has(x.feature)),
-      kept: snapA.filter((x: any) => namesB.has(x.feature))
-    }
+    const namesA = new Set((vA.snapshot || []).map((x: any) => x.feature))
+    const namesB = new Set((vB.snapshot || []).map((x: any) => x.feature))
+    return { added: (vB.snapshot || []).filter((x: any) => !namesA.has(x.feature)), removed: (vA.snapshot || []).filter((x: any) => !namesB.has(x.feature)), kept: (vA.snapshot || []).filter((x: any) => namesB.has(x.feature)) }
   }
-
   const ic = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
   const lc = "block text-xs font-bold text-slate-500 uppercase mb-1"
   const vA = versions.find(v => v.id === compareA)
@@ -586,77 +471,30 @@ function Categorias({ t }: { t: T }) {
   return (
     <div>
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
-
       {viewVersion && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <div>
-                <div className="font-black text-base">Versión del {formatDate(viewVersion.created_at)}</div>
-                <div className="text-xs text-slate-400">{viewVersion.filename} · {viewVersion.snapshot?.length || 0} características</div>
-              </div>
+              <div><div className="font-black text-base">Versión del {formatDate(viewVersion.created_at)}</div><div className="text-xs text-slate-400">{viewVersion.filename} · {viewVersion.snapshot?.length || 0} características</div></div>
               <button onClick={() => setViewVersion(null)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
             </div>
             <div className="overflow-y-auto p-6">
-              {categories.map((cat: any) => {
-                const catItems = (viewVersion.snapshot || []).filter((x: any) => x.category === cat.name)
-                if (!catItems.length) return null
-                return (
-                  <div key={cat.id} className="mb-4">
-                    <div className="text-xs font-black text-slate-400 uppercase tracking-wider py-1 border-b border-slate-100 mb-2">{cat.name}</div>
-                    {catItems.map((x: any, i: number) => <div key={i} className="text-sm text-slate-700 py-1 border-b border-slate-50">{x.feature}</div>)}
-                  </div>
-                )
-              })}
+              {categories.map((cat: any) => { const items = (viewVersion.snapshot || []).filter((x: any) => x.category === cat.name); if (!items.length) return null; return (<div key={cat.id} className="mb-4"><div className="text-xs font-black text-slate-400 uppercase tracking-wider py-1 border-b border-slate-100 mb-2">{cat.name}</div>{items.map((x: any, i: number) => <div key={i} className="text-sm text-slate-700 py-1 border-b border-slate-50">{x.feature}</div>)}</div>) })}
             </div>
           </div>
         </div>
       )}
-
       {showCompare && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <div className="font-black text-base">Comparar versiones</div>
-              <button onClick={() => setShowCompare(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
-            </div>
-            <div className="p-6 border-b border-slate-100">
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className={lc}>Versión A (base)</label>
-                  <select className={ic} value={compareA} onChange={e => setCompareA(e.target.value)}>
-                    <option value="">Selecciona...</option>
-                    {versions.map(v => <option key={v.id} value={v.id}>{formatDate(v.created_at)} — {v.filename}</option>)}
-                  </select></div>
-                <div><label className={lc}>Versión B (nueva)</label>
-                  <select className={ic} value={compareB} onChange={e => setCompareB(e.target.value)}>
-                    <option value="">Selecciona...</option>
-                    {versions.filter(v => v.id !== compareA).map(v => <option key={v.id} value={v.id}>{formatDate(v.created_at)} — {v.filename}</option>)}
-                  </select></div>
-              </div>
-            </div>
-            {diff && (
-              <div className="overflow-y-auto p-6 space-y-4">
-                {diff.added.length > 0 && <div>
-                  <div className="text-xs font-black text-emerald-600 uppercase tracking-wider mb-2">✓ Añadidas en B ({diff.added.length})</div>
-                  {diff.added.map((x: any, i: number) => <div key={i} className="text-sm text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg mb-1">{x.category} → {x.feature}</div>)}
-                </div>}
-                {diff.removed.length > 0 && <div>
-                  <div className="text-xs font-black text-red-500 uppercase tracking-wider mb-2">✗ Eliminadas en B ({diff.removed.length})</div>
-                  {diff.removed.map((x: any, i: number) => <div key={i} className="text-sm text-red-600 bg-red-50 px-3 py-1.5 rounded-lg mb-1">{x.category} → {x.feature}</div>)}
-                </div>}
-                {diff.added.length === 0 && diff.removed.length === 0 && <div className="text-center text-slate-400 py-6">Las dos versiones son idénticas</div>}
-                <div className="text-xs text-slate-400">{diff.kept.length} características sin cambios</div>
-              </div>
-            )}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100"><div className="font-black text-base">Comparar versiones</div><button onClick={() => setShowCompare(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button></div>
+            <div className="p-6 border-b border-slate-100"><div className="grid grid-cols-2 gap-4"><div><label className={lc}>Versión A (base)</label><select className={ic} value={compareA} onChange={e => setCompareA(e.target.value)}><option value="">Selecciona...</option>{versions.map(v => <option key={v.id} value={v.id}>{formatDate(v.created_at)} — {v.filename}</option>)}</select></div><div><label className={lc}>Versión B (nueva)</label><select className={ic} value={compareB} onChange={e => setCompareB(e.target.value)}><option value="">Selecciona...</option>{versions.filter(v => v.id !== compareA).map(v => <option key={v.id} value={v.id}>{formatDate(v.created_at)} — {v.filename}</option>)}</select></div></div></div>
+            {diff && (<div className="overflow-y-auto p-6 space-y-4">{diff.added.length > 0 && <div><div className="text-xs font-black text-emerald-600 uppercase tracking-wider mb-2">✓ Añadidas en B ({diff.added.length})</div>{diff.added.map((x: any, i: number) => <div key={i} className="text-sm text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg mb-1">{x.category} → {x.feature}</div>)}</div>}{diff.removed.length > 0 && <div><div className="text-xs font-black text-red-500 uppercase tracking-wider mb-2">✗ Eliminadas en B ({diff.removed.length})</div>{diff.removed.map((x: any, i: number) => <div key={i} className="text-sm text-red-600 bg-red-50 px-3 py-1.5 rounded-lg mb-1">{x.category} → {x.feature}</div>)}</div>}{diff.added.length === 0 && diff.removed.length === 0 && <div className="text-center text-slate-400 py-6">Las dos versiones son idénticas</div>}<div className="text-xs text-slate-400">{diff.kept.length} características sin cambios</div></div>)}
           </div>
         </div>
       )}
-
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight mb-1">{t.categoriasTitle}</h1>
-          <p className="text-slate-500 text-sm">{t.categoriasSubtitle}</p>
-        </div>
+        <div><h1 className="text-2xl font-black tracking-tight mb-1">{t.categoriasTitle}</h1><p className="text-slate-500 text-sm">{t.categoriasSubtitle}</p></div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={exportExcel} className="px-4 py-2 border border-slate-300 bg-white text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50">⬇ Exportar Excel</button>
           <button onClick={() => setShowCompare(true)} className="px-4 py-2 border border-slate-300 bg-white text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50">🔀 Comparar versiones</button>
@@ -666,31 +504,22 @@ function Categorias({ t }: { t: T }) {
           </label>
         </div>
       </div>
-
       <div className="bg-white rounded-xl border border-slate-100 px-4 py-3 mb-4 flex items-center gap-3">
         <span className="text-xs font-bold text-slate-400 uppercase whitespace-nowrap">Nota (opcional)</span>
         <input className="flex-1 text-sm outline-none text-slate-600" placeholder="Ej: Añadidas características de conectividad v2..." value={uploadNote} onChange={e => setUploadNote(e.target.value)} />
       </div>
-
       <div className="flex gap-2 mb-6">
         {[['cats', t.categoriasTitle], ['feats', t.caracteristicas], ['history', '📋 Historial']].map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)}
-            className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === id ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>
-            {label}
-          </button>
+          <button key={id} onClick={() => setTab(id)} className={`px-5 py-2 text-sm font-bold rounded-lg border transition ${tab === id ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200'}`}>{label}</button>
         ))}
       </div>
-
       {tab === 'cats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <h2 className="font-black text-base mb-4">{editCatId ? t.editarCategoria : t.añadirCategoria}</h2>
             <div className="mb-3"><label className={lc}>{t.nombre}</label><input className={ic} value={catForm.name} onChange={e => setCatForm({ ...catForm, name: e.target.value })} /></div>
             <div className="mb-4"><label className={lc}>{t.orden}</label><input type="number" className={ic} value={catForm.sort_order} onChange={e => setCatForm({ ...catForm, sort_order: parseInt(e.target.value) })} /></div>
-            <div className="flex gap-2">
-              {editCatId && <button onClick={() => { setEditCatId(null); setCatForm({ name: '', sort_order: 0 }) }} className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-500">{t.cancelar}</button>}
-              <button onClick={saveCat} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg">{editCatId ? t.actualizar : t.añadir}</button>
-            </div>
+            <div className="flex gap-2">{editCatId && <button onClick={() => { setEditCatId(null); setCatForm({ name: '', sort_order: 0 }) }} className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-500">{t.cancelar}</button>}<button onClick={saveCat} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg">{editCatId ? t.actualizar : t.añadir}</button></div>
           </div>
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <h2 className="font-black text-base mb-4">{t.categoriasTitle} ({categories.length})</h2>
@@ -698,109 +527,53 @@ function Categorias({ t }: { t: T }) {
               {[...categories].sort((a, b) => a.sort_order - b.sort_order).map(c => (
                 <div key={c.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-xl hover:bg-slate-50">
                   <div><div className="font-bold text-sm">{c.name}</div><div className="text-xs text-slate-400">{c.name_es && <span className="mr-2">ES: {c.name_es}</span>}{t.orden}: {c.sort_order}</div></div>
-                  <div className="flex gap-2">
-                    <button onClick={() => { setEditCatId(c.id); setCatForm(c) }} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏</button>
-                    <button onClick={() => deleteCat(c.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button>
-                  </div>
+                  <div className="flex gap-2"><button onClick={() => { setEditCatId(c.id); setCatForm(c) }} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏</button><button onClick={() => deleteCat(c.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button></div>
                 </div>
               ))}
             </div>
           </div>
         </div>
       )}
-
       {tab === 'feats' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <h2 className="font-black text-base mb-4">{editFeatId ? t.editarCaracteristica : t.añadirCaracteristica}</h2>
             <div className="mb-3"><label className={lc}>{t.nombre}</label><input className={ic} value={featForm.name} onChange={e => setFeatForm({ ...featForm, name: e.target.value })} /></div>
-            <div className="mb-3">
-              <label className={lc}>{t.categoria}</label>
-              <select className={ic} value={featForm.category_id} onChange={e => setFeatForm({ ...featForm, category_id: e.target.value })}>
-                <option value="">{t.selecciona}</option>
-                {[...categories].sort((a, b) => a.sort_order - b.sort_order).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div className="mb-3">
-              <label className={lc}>{t.tipo}</label>
-              <select className={ic} value={featForm.type} onChange={e => setFeatForm({ ...featForm, type: e.target.value })}>
-                <option value="boolean">{t.siNo}</option>
-                <option value="text">{t.texto}</option>
-                <option value="numeric">{t.numerico}</option>
-              </select>
-            </div>
+            <div className="mb-3"><label className={lc}>{t.categoria}</label><select className={ic} value={featForm.category_id} onChange={e => setFeatForm({ ...featForm, category_id: e.target.value })}><option value="">{t.selecciona}</option>{[...categories].sort((a, b) => a.sort_order - b.sort_order).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+            <div className="mb-3"><label className={lc}>{t.tipo}</label><select className={ic} value={featForm.type} onChange={e => setFeatForm({ ...featForm, type: e.target.value })}><option value="boolean">{t.siNo}</option><option value="text">{t.texto}</option><option value="numeric">{t.numerico}</option></select></div>
             <div className="mb-4"><label className={lc}>{t.orden}</label><input type="number" className={ic} value={featForm.sort_order} onChange={e => setFeatForm({ ...featForm, sort_order: parseInt(e.target.value) })} /></div>
-            <div className="flex gap-2">
-              {editFeatId && <button onClick={() => { setEditFeatId(null); setFeatForm({ name: '', category_id: '', type: 'boolean', sort_order: 0 }) }} className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-500">{t.cancelar}</button>}
-              <button onClick={saveFeat} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg">{editFeatId ? t.actualizar : t.añadir}</button>
-            </div>
+            <div className="flex gap-2">{editFeatId && <button onClick={() => { setEditFeatId(null); setFeatForm({ name: '', category_id: '', type: 'boolean', sort_order: 0 }) }} className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-500">{t.cancelar}</button>}<button onClick={saveFeat} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg">{editFeatId ? t.actualizar : t.añadir}</button></div>
           </div>
           <div className="bg-white rounded-2xl p-6 shadow-sm overflow-y-auto max-h-[600px]">
             <h2 className="font-black text-base mb-4">{t.caracteristicas} ({features.length})</h2>
             {[...categories].sort((a, b) => a.sort_order - b.sort_order).map(cat => {
               const catFeats = [...features.filter(f => f.category_id === cat.id)].sort((a, b) => a.sort_order - b.sort_order)
               if (!catFeats.length) return null
-              return (
-                <div key={cat.id} className="mb-3">
-                  <div className="text-xs font-black text-slate-400 uppercase tracking-wider py-2 border-b border-slate-100">{cat.name}</div>
-                  {catFeats.map(f => (
-                    <div key={f.id} className="flex items-center justify-between py-2 px-1 hover:bg-slate-50 rounded-lg">
-                      <div><div className="text-sm font-medium">{f.name}</div><div className="text-xs text-slate-400">{f.type}</div></div>
-                      <div className="flex gap-2">
-                        <button onClick={() => { setEditFeatId(f.id); setFeatForm(f) }} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏</button>
-                        <button onClick={() => deleteFeat(f.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )
+              return (<div key={cat.id} className="mb-3"><div className="text-xs font-black text-slate-400 uppercase tracking-wider py-2 border-b border-slate-100">{cat.name}</div>{catFeats.map(f => (<div key={f.id} className="flex items-center justify-between py-2 px-1 hover:bg-slate-50 rounded-lg"><div><div className="text-sm font-medium">{f.name}</div><div className="text-xs text-slate-400">{f.type}</div></div><div className="flex gap-2"><button onClick={() => { setEditFeatId(f.id); setFeatForm(f) }} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏</button><button onClick={() => deleteFeat(f.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button></div></div>))}</div>)
             })}
           </div>
         </div>
       )}
-
       {tab === 'history' && (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
-            <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Historial de versiones</span>
-            <span className="text-xs text-slate-400">{versions.length} versiones</span>
-          </div>
-          {versions.length === 0 && (
-            <div className="text-center py-12 text-slate-400">
-              <div className="text-4xl mb-3">📋</div>
-              <div className="font-bold">Sin versiones todavía</div>
-              <div className="text-sm mt-1">Las versiones se guardan automáticamente al importar un Excel</div>
-            </div>
-          )}
+          <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between"><span className="text-xs font-black text-slate-500 uppercase tracking-wider">Historial de versiones</span><span className="text-xs text-slate-400">{versions.length} versiones</span></div>
+          {versions.length === 0 && <div className="text-center py-12 text-slate-400"><div className="text-4xl mb-3">📋</div><div className="font-bold">Sin versiones todavía</div></div>}
           <div className="divide-y divide-slate-50">
             {versions.map((v, idx) => (
               <div key={v.id} className="px-5 py-4 hover:bg-slate-50">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${idx === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                      {idx === 0 ? '✓' : versions.length - idx}
-                    </div>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${idx === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{idx === 0 ? '✓' : versions.length - idx}</div>
                     <div>
-                      <div className="font-bold text-sm flex items-center gap-2">
-                        {formatDate(v.created_at)}
-                        {idx === 0 && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-black">ACTUAL</span>}
-                      </div>
+                      <div className="font-bold text-sm flex items-center gap-2">{formatDate(v.created_at)}{idx === 0 && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-black">ACTUAL</span>}</div>
                       <div className="text-xs text-slate-400 mt-0.5">{v.filename}</div>
                       {v.notes && <div className="text-xs text-slate-600 mt-1 bg-slate-50 px-2 py-1 rounded-lg">{v.notes}</div>}
-                      <div className="flex gap-3 mt-1">
-                        <span className="text-xs text-emerald-600">+{v.changes_added} añadidas</span>
-                        <span className="text-xs text-slate-400">{v.snapshot?.length || 0} total</span>
-                      </div>
+                      <div className="flex gap-3 mt-1"><span className="text-xs text-emerald-600">+{v.changes_added} añadidas</span><span className="text-xs text-slate-400">{v.snapshot?.length || 0} total</span></div>
                     </div>
                   </div>
                   <div className="flex gap-2 shrink-0">
                     <button onClick={() => setViewVersion(v)} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">👁 Ver</button>
-                    {idx !== 0 && (
-                      <button onClick={() => restoreVersion(v)} disabled={restoring}
-                        className="px-3 py-1 text-xs border border-amber-200 text-amber-600 rounded-lg hover:bg-amber-50 disabled:opacity-50">
-                        ↩ Restaurar
-                      </button>
-                    )}
+                    {idx !== 0 && <button onClick={() => restoreVersion(v)} disabled={restoring} className="px-3 py-1 text-xs border border-amber-200 text-amber-600 rounded-lg hover:bg-amber-50 disabled:opacity-50">↩ Restaurar</button>}
                   </div>
                 </div>
               </div>
@@ -821,12 +594,8 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
   const [error, setError] = useState('')
 
   const segmentFeat = features.find((f: any) => f.name === 'Segment')
-  const segments: string[] = segmentFeat
-    ? Array.from(new Set<string>(values.filter((v: any) => v.feature_id === segmentFeat.id && v.value).map((v: any) => String(v.value)))).sort()
-    : []
-  const modelsInSegment = segment && segmentFeat
-    ? models.filter((m: any) => values.find((v: any) => v.feature_id === segmentFeat.id && v.model_id === m.id && v.value === segment))
-    : models
+  const segments: string[] = segmentFeat ? Array.from(new Set<string>(values.filter((v: any) => v.feature_id === segmentFeat.id && v.value).map((v: any) => String(v.value)))).sort() : []
+  const modelsInSegment = segment && segmentFeat ? models.filter((m: any) => values.find((v: any) => v.feature_id === segmentFeat.id && v.model_id === m.id && v.value === segment)) : models
   const model1 = modelsInSegment.find((m: any) => m.id === model1Id)
   const model2 = modelsInSegment.find((m: any) => m.id === model2Id)
   useEffect(() => { setModel1Id(''); setModel2Id(''); setAnalysis(''); setError('') }, [segment])
@@ -866,48 +635,358 @@ function Analisis({ models, categories, features, values, t, lang }: any) {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         {[{ label: 'Vehículo 1', value: model1Id, set: setModel1Id, other: model2Id }, { label: 'Vehículo 2', value: model2Id, set: setModel2Id, other: model1Id }].map(({ label, value, set, other }) => (
-          <div key={label}>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">{label}</label>
-            <select value={value} onChange={e => set(e.target.value)} className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-400 bg-white">
-              <option value="">Selecciona un vehículo...</option>
-              {modelsInSegment.filter((m: any) => m.id !== other).map((m: any) => <option key={m.id} value={m.id}>{m.brand} {m.name} {m.version}</option>)}
-            </select>
-          </div>
+          <div key={label}><label className="block text-xs font-bold text-slate-500 uppercase mb-2">{label}</label><select value={value} onChange={e => set(e.target.value)} className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-400 bg-white"><option value="">Selecciona un vehículo...</option>{modelsInSegment.filter((m: any) => m.id !== other).map((m: any) => <option key={m.id} value={m.id}>{m.brand} {m.name} {m.version}</option>)}</select></div>
         ))}
       </div>
       {model1 && model2 && (
         <div className="grid grid-cols-2 gap-4 mb-6">
           {[model1, model2].map((m: any) => (
             <div key={m.id} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center gap-4 shadow-sm">
-              <div className="w-20 h-14 bg-slate-50 rounded-xl overflow-hidden shrink-0 flex items-center justify-center">
-                {m.img_url ? <img src={m.img_url} className="max-w-full max-h-full object-contain" /> : <span className="text-xs text-slate-400">Sin img</span>}
-              </div>
-              <div>
-                <div className="text-xs font-bold text-blue-600 uppercase">{m.brand}</div>
-                <div className="font-black text-base">{m.name} {m.version}</div>
-                <div className="text-xs text-slate-400">{m.price}</div>
-              </div>
+              <div className="w-20 h-14 bg-slate-50 rounded-xl overflow-hidden shrink-0 flex items-center justify-center">{m.img_url ? <img src={m.img_url} className="max-w-full max-h-full object-contain" /> : <span className="text-xs text-slate-400">Sin img</span>}</div>
+              <div><div className="text-xs font-bold text-blue-600 uppercase">{m.brand}</div><div className="font-black text-base">{m.name} {m.version}</div><div className="text-xs text-slate-400">{m.price}</div></div>
             </div>
           ))}
         </div>
       )}
-      <button onClick={generate} disabled={!model1 || !model2 || loading}
-        className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-40 text-sm mb-6 flex items-center justify-center gap-2">
+      <button onClick={generate} disabled={!model1 || !model2 || loading} className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-40 text-sm mb-6 flex items-center justify-center gap-2">
         {loading ? (<><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>Generando análisis...</>) : '✦ Generar análisis con IA'}
       </button>
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">{error}</div>}
       {analysis && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8">
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Análisis generado por IA</span>
-            </div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div><span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Análisis generado por IA</span></div>
             <button onClick={() => navigator.clipboard.writeText(analysis)} className="text-xs text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg px-3 py-1">📋 Copiar</button>
           </div>
           <div dangerouslySetInnerHTML={{ __html: renderMarkdown(analysis) }} />
         </div>
       )}
+    </div>
+  )
+}
+
+function ValorCliente({ models, categories, features, values, lang }: any) {
+  const [segment, setSegment] = useState('')
+  const [model1Id, setModel1Id] = useState('')
+  const [model2Id, setModel2Id] = useState('')
+  const [valorItems, setValorItems] = useState<Record<string, number>>({})
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [analysis, setAnalysis] = useState('')
+  const [error, setError] = useState('')
+  const [msg, setMsg] = useState('')
+
+  const segmentFeat = features.find((f: any) => f.name === 'Segment')
+  const segments: string[] = segmentFeat ? Array.from(new Set<string>(values.filter((v: any) => v.feature_id === segmentFeat.id && v.value).map((v: any) => String(v.value)))).sort() : []
+  const modelsInSegment = segment && segmentFeat ? models.filter((m: any) => values.find((v: any) => v.feature_id === segmentFeat.id && v.model_id === m.id && v.value === segment)) : models
+  const model1 = modelsInSegment.find((m: any) => m.id === model1Id)
+  const model2 = modelsInSegment.find((m: any) => m.id === model2Id)
+
+  useEffect(() => { setModel1Id(''); setModel2Id(''); setAnalysis(''); setError('') }, [segment])
+
+  useEffect(() => {
+    async function loadValorItems() {
+      const { data } = await supabase.from('valor_cliente_items').select('*')
+      if (data) {
+        const map: Record<string, number> = {}
+        data.forEach((d: any) => { map[d.feature_id] = d.valor_default })
+        setValorItems(map)
+      }
+    }
+    loadValorItems()
+  }, [])
+
+  function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 3000) }
+
+  function getVal(featId: string, modelId: string) {
+    const v = values.find((v: any) => v.feature_id === featId && v.model_id === modelId)
+    return v ? v.value : '—'
+  }
+
+  function valuesAreDifferent(featId: string) {
+    if (!model1 || !model2) return false
+    const v1 = getVal(featId, model1.id)
+    const v2 = getVal(featId, model2.id)
+    return v1 !== v2
+  }
+
+  function isDifferentNumeric(v1: string, v2: string) {
+    const n1 = parseFloat(v1)
+    const n2 = parseFloat(v2)
+    return !isNaN(n1) && !isNaN(n2) && n1 !== n2
+  }
+
+  // Filas diferenciales — solo las que son distintas entre los dos vehículos
+  const diffRows = model1 && model2 ? categories.flatMap((cat: any) => {
+    const feats = features.filter((f: any) => f.category_id === cat.id)
+    const diffs = feats.filter((f: any) => {
+      const v1 = getVal(f.id, model1.id)
+      const v2 = getVal(f.id, model2.id)
+      if (v1 === v2) return false
+      if (v1 === '—' && v2 === '—') return false
+      return true
+    })
+    return diffs.map((f: any, fi: number) => ({ ...f, catName: getName(cat, lang), isFirst: fi === 0 }))
+  }) : []
+
+  // Calcular ajuste por fila
+  function calcAjuste(feat: any): number {
+    if (!model1 || !model2) return 0
+    const v1 = getVal(feat.id, model1.id).toLowerCase().trim()
+    const v2 = getVal(feat.id, model2.id).toLowerCase().trim()
+    const valor = valorItems[feat.id] || 0
+    if (valor === 0) return 0
+
+    // Para booleanos: si m1 (LIUX) tiene Sí y m2 no → suma; si m2 tiene Sí y m1 no → resta
+    const v1Yes = v1 === 'yes' || v1 === 'sí' || v1 === 'si'
+    const v2Yes = v2 === 'yes' || v2 === 'sí' || v2 === 'si'
+    if (v1Yes && !v2Yes) return +valor  // LIUX lo tiene, competidor no → LIUX vale más
+    if (!v1Yes && v2Yes) return -valor  // Competidor lo tiene, LIUX no → resta al LIUX
+
+    // Para numéricos: si m1 > m2 → suma proporcional; si m1 < m2 → resta
+    const n1 = parseFloat(getVal(feat.id, model1.id))
+    const n2 = parseFloat(getVal(feat.id, model2.id))
+    if (!isNaN(n1) && !isNaN(n2)) {
+      if (n1 > n2) return +valor
+      if (n1 < n2) return -valor
+    }
+
+    return 0
+  }
+
+  const precioBase = parseFloat(model1?.price?.replace(/[^0-9.]/g, '') || '0')
+  const ajusteTotal = diffRows.reduce((sum, feat) => sum + calcAjuste(feat), 0)
+  const precioEstimado = precioBase - ajusteTotal // precio del competidor estimado
+
+  async function saveValorItems() {
+    setSaving(true)
+    const upserts = Object.entries(valorItems).map(([feature_id, valor_default]) => ({ feature_id, valor_default }))
+    for (const u of upserts) {
+      await supabase.from('valor_cliente_items').upsert(u, { onConflict: 'feature_id' })
+    }
+    toast('Valores guardados ✓')
+    setSaving(false)
+  }
+
+  async function generateAnalysis() {
+    if (!model1 || !model2) return
+    setLoading(true); setAnalysis(''); setError('')
+    try {
+      const ajustes = diffRows.map(feat => ({
+        caracteristica: feat.name,
+        valor_m1: getVal(feat.id, model1.id),
+        valor_m2: getVal(feat.id, model2.id),
+        ajuste: calcAjuste(feat)
+      })).filter(a => a.ajuste !== 0)
+
+      const res = await fetch('/api/valor-cliente', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model1, model2, ajustes,
+          precioBase, ajusteTotal, precioEstimado, lang
+        })
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setAnalysis(data.analysis)
+    } catch (e: any) { setError(e.message) }
+    setLoading(false)
+  }
+
+  function renderMarkdown(text: string) {
+    return text
+      .replace(/^## (.+)$/gm, '<h2 class="text-lg font-black text-slate-800 mt-6 mb-2 pb-1 border-b border-slate-200">$1</h2>')
+      .replace(/^### (.+)$/gm, '<h3 class="text-sm font-black text-blue-600 uppercase tracking-wider mt-4 mb-1">$1</h3>')
+      .replace(/^- (.+)$/gm, '<li class="text-sm text-slate-700 ml-4 mb-1">• $1</li>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/^(?!<[h|l])(.+)$/gm, '<p class="text-sm text-slate-700 mb-2">$1</p>')
+  }
+
+  return (
+    <div>
+      {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
+      <div className="flex items-center justify-between mb-1 flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight">Valor Cliente</h1>
+          <p className="text-slate-500 text-sm">Estima el precio justo de mercado del competidor en base al valor del equipamiento</p>
+        </div>
+        {model1 && model2 && (
+          <button onClick={saveValorItems} disabled={saving}
+            className="px-4 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg hover:bg-[#162040] disabled:opacity-50">
+            {saving ? 'Guardando...' : '💾 Guardar valores'}
+          </button>
+        )}
+      </div>
+
+      {/* SELECTOR SEGMENTO */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-6 shadow-sm mt-6">
+        <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-3">Segmento</label>
+        <div className="flex gap-3 flex-wrap">
+          <button onClick={() => setSegment('')} className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${!segment ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>Todos</button>
+          {segments.map(seg => <button key={seg} onClick={() => setSegment(seg)} className={`px-5 py-2.5 rounded-xl text-sm font-bold border-2 transition ${segment === seg ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>{seg}</button>)}
+        </div>
+      </div>
+
+      {/* SELECTOR VEHÍCULOS */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        {[
+          { label: 'Vehículo propio (LIUX)', value: model1Id, set: setModel1Id, other: model2Id, color: 'border-blue-200 bg-blue-50' },
+          { label: 'Vehículo competidor', value: model2Id, set: setModel2Id, other: model1Id, color: 'border-amber-200 bg-amber-50' }
+        ].map(({ label, value, set, other, color }) => (
+          <div key={label}>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">{label}</label>
+            <select value={value} onChange={e => set(e.target.value)} className={`w-full border-2 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-400 ${color}`}>
+              <option value="">Selecciona un vehículo...</option>
+              {modelsInSegment.filter((m: any) => m.id !== other).map((m: any) => <option key={m.id} value={m.id}>{m.brand} {m.name} {m.version}</option>)}
+            </select>
+          </div>
+        ))}
+      </div>
+
+      {/* PREVIEW VEHÍCULOS */}
+      {model1 && model2 && (
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          {[
+            { model: model1, label: 'LIUX', color: 'border-blue-200' },
+            { model: model2, label: 'Competidor', color: 'border-amber-200' }
+          ].map(({ model, label, color }) => (
+            <div key={model.id} className={`bg-white rounded-2xl border-2 ${color} p-4 flex items-center gap-4 shadow-sm`}>
+              <div className="w-20 h-14 bg-slate-50 rounded-xl overflow-hidden shrink-0 flex items-center justify-center">
+                {model.img_url ? <img src={model.img_url} className="max-w-full max-h-full object-contain" /> : <span className="text-xs text-slate-400">Sin img</span>}
+              </div>
+              <div>
+                <div className="text-[10px] font-black text-slate-400 uppercase">{label}</div>
+                <div className="text-xs font-bold text-blue-600 uppercase">{model.brand}</div>
+                <div className="font-black text-base">{model.name} {model.version}</div>
+                <div className="text-xs text-slate-500 font-bold">{model.price ? `${model.price}€` : 'Precio no definido'}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* TABLA DIFERENCIAS CON VALORES */}
+      {model1 && model2 && (
+        <>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-x-auto mb-4">
+            <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Diferencias de equipamiento</span>
+              <span className="text-xs text-slate-400">{diffRows.length} puntos diferenciales</span>
+            </div>
+            <table className="w-full border-collapse text-xs">
+              <colgroup>
+                <col style={{ width: '80px' }} />
+                <col style={{ width: '180px' }} />
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '100px' }} />
+                <col style={{ width: '110px' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="bg-[#081224] text-white text-left px-3 py-2 font-black uppercase text-[8px]">Cat.</th>
+                  <th className="bg-[#081224] text-white text-left px-3 py-2 font-black uppercase text-[8px]">Característica</th>
+                  <th className="bg-blue-900 text-blue-200 text-center px-2 py-2 font-black text-[8px]">{model1.brand} {model1.version}</th>
+                  <th className="bg-amber-900 text-amber-200 text-center px-2 py-2 font-black text-[8px]">{model2.brand} {model2.version}</th>
+                  <th className="bg-[#081224] text-white text-center px-2 py-2 font-black uppercase text-[8px]">Valor (€)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diffRows.map((feat: any) => {
+                  const v1 = getVal(feat.id, model1.id)
+                  const v2 = getVal(feat.id, model2.id)
+                  const ajuste = calcAjuste(feat)
+                  const lo1 = v1.toLowerCase().trim()
+                  const lo2 = v2.toLowerCase().trim()
+                  const display = (v: string) => { const lo = v.toLowerCase().trim(); if (lo === 'yes') return '✓'; if (lo === 'no') return '✗'; return v }
+                  const cls = (v: string) => { const lo = v.toLowerCase().trim(); if (lo === 'yes') return 'text-emerald-700 bg-emerald-50 font-black'; if (lo === 'no') return 'text-red-600 bg-red-50 font-black'; if (lo === 'n/a') return 'text-slate-400'; return '' }
+                  return (
+                    <tr key={feat.id} className={feat.isFirst ? 'border-t-2 border-slate-200' : ''}>
+                      <td className="border border-slate-100 px-2 py-2 text-[9px] font-bold text-slate-500 bg-slate-50">{feat.isFirst ? feat.catName : ''}</td>
+                      <td className="border border-slate-100 px-2 py-2 text-[9px] text-slate-700">{getName(feat, lang)}</td>
+                      <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${cls(v1)}`}>{display(v1)}</td>
+                      <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${cls(v2)}`}>{display(v2)}</td>
+                      <td className="border border-slate-100 px-2 py-1.5 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <input
+                            type="number"
+                            value={valorItems[feat.id] ?? 0}
+                            onChange={e => setValorItems(prev => ({ ...prev, [feat.id]: parseFloat(e.target.value) || 0 }))}
+                            className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center outline-none focus:border-blue-400"
+                          />
+                          {ajuste !== 0 && (
+                            <span className={`text-[9px] font-black ${ajuste > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                              {ajuste > 0 ? '+' : ''}{ajuste}€
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* RESUMEN */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-6">
+            <h3 className="font-black text-base mb-4 text-slate-700 uppercase tracking-wider">Resumen Valor Cliente</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
+                <div className="text-xs font-black text-blue-600 uppercase mb-1">Precio base {model1.brand} {model1.version}</div>
+                <div className="text-2xl font-black text-blue-900">{precioBase ? `${precioBase.toLocaleString('es-ES')}€` : 'No definido'}</div>
+              </div>
+              <div className={`border rounded-xl p-4 text-center ${ajusteTotal >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+                <div className={`text-xs font-black uppercase mb-1 ${ajusteTotal >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>Ajuste neto</div>
+                <div className={`text-2xl font-black ${ajusteTotal >= 0 ? 'text-emerald-900' : 'text-red-900'}`}>
+                  {ajusteTotal >= 0 ? '+' : ''}{ajusteTotal.toLocaleString('es-ES')}€
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  {ajusteTotal >= 0 ? `LIUX aporta más valor` : `Competidor aporta más valor`}
+                </div>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
+                <div className="text-xs font-black text-amber-600 uppercase mb-1">Precio justo estimado {model2.brand} {model2.version}</div>
+                <div className="text-2xl font-black text-amber-900">{precioEstimado ? `${precioEstimado.toLocaleString('es-ES')}€` : '—'}</div>
+              </div>
+            </div>
+            {precioBase > 0 && (
+              <div className={`rounded-xl px-4 py-3 text-sm font-medium ${ajusteTotal >= 0 ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+                {ajusteTotal >= 0
+                  ? `✓ El ${model1.brand} ${model1.version} a ${precioBase.toLocaleString('es-ES')}€ ofrece ${ajusteTotal.toLocaleString('es-ES')}€ más de valor que el ${model2.brand} ${model2.version}. Para ser equivalente, el competidor debería costar ${precioEstimado.toLocaleString('es-ES')}€.`
+                  : `⚠ El ${model2.brand} ${model2.version} aporta ${Math.abs(ajusteTotal).toLocaleString('es-ES')}€ más de valor que el ${model1.brand} ${model1.version}. Para ser equivalente, el competidor debería costar ${precioEstimado.toLocaleString('es-ES')}€.`
+                }
+              </div>
+            )}
+          </div>
+
+          {/* BOTÓN ANÁLISIS IA */}
+          <button onClick={generateAnalysis} disabled={loading || diffRows.length === 0}
+            className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-40 text-sm mb-6 flex items-center justify-center gap-2">
+            {loading ? (<><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>Generando análisis...</>) : '✦ Generar argumento comercial con IA'}
+          </button>
+
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">{error}</div>}
+
+          {analysis && (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div><span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Argumento comercial generado por IA</span></div>
+                <button onClick={() => navigator.clipboard.writeText(analysis)} className="text-xs text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg px-3 py-1">📋 Copiar</button>
+              </div>
+              <div dangerouslySetInnerHTML={{ __html: renderMarkdown(analysis) }} />
+            </div>
+          )}
+        </>
+      )}
+
+      {!model1 || !model2 ? (
+        <div className="text-center py-16 text-slate-400">
+          <div className="text-5xl mb-4">⚖️</div>
+          <div className="font-bold text-base mb-1">Selecciona dos vehículos para comenzar</div>
+          <div className="text-sm">El módulo calculará el precio justo de mercado del competidor</div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -966,13 +1045,9 @@ function Configuracion({ features }: { features: any[] }) {
               className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 cursor-grab active:cursor-grabbing">
               <div className="text-slate-300 text-lg select-none">⠿</div>
               <div className="w-5 text-xs font-bold text-slate-300">{idx + 1}</div>
-              <input className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400"
-                value={field.label} onChange={e => updateLabel(idx, e.target.value)} onBlur={saveLabel} />
+              <input className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400" value={field.label} onChange={e => updateLabel(idx, e.target.value)} onBlur={saveLabel} />
               <div className="text-xs text-slate-400 truncate max-w-[200px] hidden md:block">{field.feature_name}</div>
-              <button onClick={() => toggleField(idx)}
-                className={`px-3 py-1 text-xs font-bold rounded-full transition ${field.enabled ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-                {field.enabled ? 'Visible' : 'Oculto'}
-              </button>
+              <button onClick={() => toggleField(idx)} className={`px-3 py-1 text-xs font-bold rounded-full transition ${field.enabled ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{field.enabled ? 'Visible' : 'Oculto'}</button>
               <button onClick={() => removeField(idx)} className="text-slate-300 hover:text-red-400 transition text-sm">🗑</button>
             </div>
           ))}
@@ -982,17 +1057,8 @@ function Configuracion({ features }: { features: any[] }) {
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 mb-4">
           <h3 className="font-black text-sm mb-4 text-slate-700 uppercase tracking-wider">Añadir campo</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Característica</label>
-              <select className={ic} value={newField.feature_name} onChange={e => setNewField({ ...newField, feature_name: e.target.value })}>
-                <option value="">Selecciona...</option>
-                {features.filter(f => !fields.find(cf => cf.feature_name === f.name)).map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Etiqueta corta</label>
-              <input className={ic} value={newField.label} onChange={e => setNewField({ ...newField, label: e.target.value })} placeholder="ej. Autonomía" />
-            </div>
+            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Característica</label><select className={ic} value={newField.feature_name} onChange={e => setNewField({ ...newField, feature_name: e.target.value })}><option value="">Selecciona...</option>{features.filter(f => !fields.find(cf => cf.feature_name === f.name)).map(f => <option key={f.id} value={f.name}>{f.name}</option>)}</select></div>
+            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Etiqueta corta</label><input className={ic} value={newField.label} onChange={e => setNewField({ ...newField, label: e.target.value })} placeholder="ej. Autonomía" /></div>
           </div>
           <div className="flex gap-2">
             <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-500">Cancelar</button>
@@ -1045,6 +1111,7 @@ export default function ComparadorClient({ models, categories, features, values 
           {active === 'modelos' && <Modelos t={t} />}
           {active === 'categorias' && <Categorias t={t} />}
           {active === 'analisis' && <Analisis models={models} categories={categories} features={features} values={values} t={t} lang={lang} />}
+          {active === 'valor' && <ValorCliente models={models} categories={categories} features={features} values={values} lang={lang} />}
           {active === 'config' && <Configuracion features={features} />}
         </main>
       </div>
