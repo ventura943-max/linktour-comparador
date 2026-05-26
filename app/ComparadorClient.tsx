@@ -704,17 +704,29 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
     return v ? v.value : '—'
   }
 
-  // Detecta si el sistema puede calcular el signo automáticamente
+  const isBoolean = (v: string) => {
+    const lo = v.toLowerCase().trim()
+    return lo === 'yes' || lo === 'no' || lo === 'sí' || lo === 'si'
+  }
+
+  const isPositive = (v: string) => {
+    const lo = v.toLowerCase().trim()
+    return lo === 'yes' || lo === 'sí' || lo === 'si'
+  }
+
+  const isNumericPure = (v: string) => {
+    const n = parseFloat(v.trim())
+    return !isNaN(n) && v.trim() !== ''
+  }
+
+  // Auto-sign: SOLO si ambos son booleanos O ambos son numéricos puros y distintos
   function canAutoSign(feat: any): boolean {
     if (!model1 || !model2) return false
-    const v1 = getVal(feat.id, model1.id).toLowerCase().trim()
-    const v2 = getVal(feat.id, model2.id).toLowerCase().trim()
-    if (v1 === v2) return false // valores iguales → siempre manual
-    const isBoolean = (v: string) => v === 'yes' || v === 'no' || v === 'sí' || v === 'si'
-    if (isBoolean(v1) || isBoolean(v2)) return true
-    const n1 = parseFloat(v1)
-    const n2 = parseFloat(v2)
-    if (!isNaN(n1) && !isNaN(n2)) return true
+    const v1 = getVal(feat.id, model1.id)
+    const v2 = getVal(feat.id, model2.id)
+    if (v1 === v2) return false
+    if (isBoolean(v1) && isBoolean(v2)) return true
+    if (isNumericPure(v1) && isNumericPure(v2)) return true
     return false
   }
 
@@ -723,31 +735,34 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
     const valor = valorItems[feat.id] || 0
     if (valor === 0) return 0
 
-    const v1 = getVal(feat.id, model1.id).toLowerCase().trim()
-    const v2 = getVal(feat.id, model2.id).toLowerCase().trim()
+    const v1 = getVal(feat.id, model1.id)
+    const v2 = getVal(feat.id, model2.id)
 
     // Signo manual tiene prioridad siempre
     const signoManual = signoItems[feat.id]
     if (signoManual !== undefined && signoManual !== 0) return signoManual * valor
 
-    // Auto para booleanos
-    const v1Yes = v1 === 'yes' || v1 === 'sí' || v1 === 'si'
-    const v2Yes = v2 === 'yes' || v2 === 'sí' || v2 === 'si'
-    if (v1Yes && !v2Yes) return +valor
-    if (!v1Yes && v2Yes) return -valor
-
-    // Auto para numéricos
-    const n1 = parseFloat(getVal(feat.id, model1.id))
-    const n2 = parseFloat(getVal(feat.id, model2.id))
-    if (!isNaN(n1) && !isNaN(n2)) {
-      if (n1 > n2) return +valor
-      if (n1 < n2) return -valor
+    // Auto booleanos: ambos deben ser booleanos
+    if (isBoolean(v1) && isBoolean(v2)) {
+      if (isPositive(v1) && !isPositive(v2)) return +valor
+      if (!isPositive(v1) && isPositive(v2)) return -valor
+      return 0
     }
 
+    // Auto numéricos: ambos deben ser numéricos puros
+    if (isNumericPure(v1) && isNumericPure(v2)) {
+      const n1 = parseFloat(v1)
+      const n2 = parseFloat(v2)
+      if (n1 > n2) return +valor
+      if (n1 < n2) return -valor
+      return 0
+    }
+
+    // Cualquier otro caso: necesita signo manual → no aplica ajuste sin él
     return 0
   }
 
-  // TODAS las filas de la ficha, igual que el comparador
+  // TODAS las filas igual que la ficha completa
   const allRows = model1 && model2 ? categories.flatMap((cat: any) => {
     const feats = features.filter((f: any) => f.category_id === cat.id)
     return feats.map((f: any, fi: number) => ({ ...f, catName: getName(cat, lang), isFirst: fi === 0 }))
@@ -886,29 +901,40 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
                   const v2 = getVal(feat.id, model2.id)
                   const ajuste = calcAjuste(feat)
                   const isDiff = v1 !== v2
-                  const autoSign = canAutoSign(feat)
+                  const auto = canAutoSign(feat)
                   const signoManual = signoItems[feat.id]
-                  const display = (v: string) => { const lo = v.toLowerCase().trim(); if (lo === 'yes') return '✓'; if (lo === 'no') return '✗'; return v }
-                  const cls = (v: string) => { const lo = v.toLowerCase().trim(); if (lo === 'yes') return 'text-emerald-700 bg-emerald-50 font-black'; if (lo === 'no') return 'text-red-600 bg-red-50 font-black'; if (lo === 'n/a') return 'text-slate-400'; return '' }
+                  const displayVal = (v: string) => {
+                    const lo = v.toLowerCase().trim()
+                    if (lo === 'yes') return '✓'
+                    if (lo === 'no') return '✗'
+                    return v
+                  }
+                  const clsVal = (v: string) => {
+                    const lo = v.toLowerCase().trim()
+                    if (lo === 'yes') return 'text-emerald-700 bg-emerald-50 font-black'
+                    if (lo === 'no') return 'text-red-600 bg-red-50 font-black'
+                    if (lo === 'n/a') return 'text-slate-400'
+                    return ''
+                  }
                   return (
-                    <tr key={feat.id} className={`${feat.isFirst ? 'border-t-2 border-slate-200' : ''} ${isDiff ? '' : 'opacity-60'}`}>
+                    <tr key={feat.id} className={`${feat.isFirst ? 'border-t-2 border-slate-200' : ''} ${!isDiff ? 'opacity-50' : ''}`}>
                       <td className="border border-slate-100 px-2 py-2 text-[9px] font-bold text-slate-500 bg-slate-50 whitespace-nowrap overflow-hidden text-ellipsis">{feat.isFirst ? feat.catName : ''}</td>
                       <td className="border border-slate-100 px-2 py-2 text-[9px] text-slate-700">{getName(feat, lang)}</td>
-                      <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${cls(v1)}`}>{display(v1)}</td>
-                      <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${cls(v2)}`}>{display(v2)}</td>
+                      <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${clsVal(v1)}`}>{displayVal(v1)}</td>
+                      <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${clsVal(v2)}`}>{displayVal(v2)}</td>
                       <td className="border border-slate-100 px-2 py-1.5">
                         <div className="flex items-center justify-center gap-1">
-                          {/* Selector +/− siempre visible cuando no hay auto-sign */}
-                          {!autoSign && (
+                          {/* Selector +/− cuando NO hay auto-sign (tipos mixtos, texto libre, iguales) */}
+                          {!auto && (
                             <div className="flex rounded-lg overflow-hidden border border-slate-200 text-[9px] font-black shrink-0">
                               <button
                                 onClick={() => setSignoItems(prev => ({ ...prev, [feat.id]: signoManual === 1 ? 0 : 1 }))}
                                 className={`px-1.5 py-1 transition ${signoManual === 1 ? 'bg-emerald-500 text-white' : 'bg-white text-slate-400 hover:bg-emerald-50'}`}
-                                title="LIUX es mejor">+</button>
+                                title="LIUX es mejor en esta característica">+</button>
                               <button
                                 onClick={() => setSignoItems(prev => ({ ...prev, [feat.id]: signoManual === -1 ? 0 : -1 }))}
                                 className={`px-1.5 py-1 transition border-l border-slate-200 ${signoManual === -1 ? 'bg-red-500 text-white' : 'bg-white text-slate-400 hover:bg-red-50'}`}
-                                title="Competidor es mejor">−</button>
+                                title="Competidor es mejor en esta característica">−</button>
                             </div>
                           )}
                           <input
