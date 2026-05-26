@@ -670,7 +670,6 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
   const [model1Id, setModel1Id] = useState('')
   const [model2Id, setModel2Id] = useState('')
   const [valorItems, setValorItems] = useState<Record<string, number>>({})
-  // signoItems: 1 = positivo (LIUX mejor), -1 = negativo (competidor mejor), 0 = auto
   const [signoItems, setSignoItems] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -710,6 +709,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
     if (!model1 || !model2) return false
     const v1 = getVal(feat.id, model1.id).toLowerCase().trim()
     const v2 = getVal(feat.id, model2.id).toLowerCase().trim()
+    if (v1 === v2) return false // valores iguales → siempre manual
     const isBoolean = (v: string) => v === 'yes' || v === 'no' || v === 'sí' || v === 'si'
     if (isBoolean(v1) || isBoolean(v2)) return true
     const n1 = parseFloat(v1)
@@ -720,16 +720,15 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
 
   function calcAjuste(feat: any): number {
     if (!model1 || !model2) return 0
-    const v1 = getVal(feat.id, model1.id).toLowerCase().trim()
-    const v2 = getVal(feat.id, model2.id).toLowerCase().trim()
     const valor = valorItems[feat.id] || 0
     if (valor === 0) return 0
 
-    // Si el usuario ha especificado el signo manualmente
+    const v1 = getVal(feat.id, model1.id).toLowerCase().trim()
+    const v2 = getVal(feat.id, model2.id).toLowerCase().trim()
+
+    // Signo manual tiene prioridad siempre
     const signoManual = signoItems[feat.id]
-    if (signoManual !== undefined && signoManual !== 0) {
-      return signoManual * valor
-    }
+    if (signoManual !== undefined && signoManual !== 0) return signoManual * valor
 
     // Auto para booleanos
     const v1Yes = v1 === 'yes' || v1 === 'sí' || v1 === 'si'
@@ -748,20 +747,14 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
     return 0
   }
 
-  const diffRows = model1 && model2 ? categories.flatMap((cat: any) => {
+  // TODAS las filas de la ficha, igual que el comparador
+  const allRows = model1 && model2 ? categories.flatMap((cat: any) => {
     const feats = features.filter((f: any) => f.category_id === cat.id)
-    const diffs = feats.filter((f: any) => {
-      const v1 = getVal(f.id, model1.id)
-      const v2 = getVal(f.id, model2.id)
-      if (v1 === v2) return false
-      if (v1 === '—' && v2 === '—') return false
-      return true
-    })
-    return diffs.map((f: any, fi: number) => ({ ...f, catName: getName(cat, lang), isFirst: fi === 0 }))
+    return feats.map((f: any, fi: number) => ({ ...f, catName: getName(cat, lang), isFirst: fi === 0 }))
   }) : []
 
   const precioBase = parseFloat(model1?.price?.replace(/[^0-9.]/g, '') || '0')
-  const ajusteTotal = diffRows.reduce((sum: number, feat: any) => sum + calcAjuste(feat), 0)
+  const ajusteTotal = allRows.reduce((sum: number, feat: any) => sum + calcAjuste(feat), 0)
   const precioEstimado = precioBase - ajusteTotal
 
   async function saveValorItems() {
@@ -778,7 +771,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
     if (!model1 || !model2) return
     setLoading(true); setAnalysis(''); setError('')
     try {
-      const ajustes = diffRows.map((feat: any) => ({
+      const ajustes = allRows.map((feat: any) => ({
         caracteristica: feat.name,
         valor_m1: getVal(feat.id, model1.id),
         valor_m2: getVal(feat.id, model2.id),
@@ -847,10 +840,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
 
       {model1 && model2 && (
         <div className="grid grid-cols-2 gap-4 mb-6">
-          {[
-            { model: model1, label: 'LIUX', color: 'border-blue-200' },
-            { model: model2, label: 'Competidor', color: 'border-amber-200' }
-          ].map(({ model, label, color }) => (
+          {[{ model: model1, label: 'LIUX', color: 'border-blue-200' }, { model: model2, label: 'Competidor', color: 'border-amber-200' }].map(({ model, label, color }) => (
             <div key={model.id} className={`bg-white rounded-2xl border-2 ${color} p-4 flex items-center gap-4 shadow-sm`}>
               <div className="w-20 h-14 bg-slate-50 rounded-xl overflow-hidden shrink-0 flex items-center justify-center">
                 {model.img_url ? <img src={model.img_url} className="max-w-full max-h-full object-contain" /> : <span className="text-xs text-slate-400">Sin img</span>}
@@ -870,16 +860,16 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
         <>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-x-auto mb-4">
             <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
-              <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Diferencias de equipamiento</span>
-              <span className="text-xs text-slate-400">{diffRows.length} puntos diferenciales</span>
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Ficha de equipamiento</span>
+              <span className="text-xs text-slate-400">{allRows.length} características · {allRows.filter((f: any) => calcAjuste(f) !== 0).length} con valor asignado</span>
             </div>
             <table className="w-full border-collapse text-xs">
               <colgroup>
                 <col style={{ width: '80px' }} />
-                <col style={{ width: '180px' }} />
+                <col style={{ width: '190px' }} />
                 <col style={{ width: '100px' }} />
                 <col style={{ width: '100px' }} />
-                <col style={{ width: '140px' }} />
+                <col style={{ width: '150px' }} />
               </colgroup>
               <thead>
                 <tr>
@@ -891,33 +881,34 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
                 </tr>
               </thead>
               <tbody>
-                {diffRows.map((feat: any) => {
+                {allRows.map((feat: any) => {
                   const v1 = getVal(feat.id, model1.id)
                   const v2 = getVal(feat.id, model2.id)
                   const ajuste = calcAjuste(feat)
+                  const isDiff = v1 !== v2
                   const autoSign = canAutoSign(feat)
                   const signoManual = signoItems[feat.id]
                   const display = (v: string) => { const lo = v.toLowerCase().trim(); if (lo === 'yes') return '✓'; if (lo === 'no') return '✗'; return v }
                   const cls = (v: string) => { const lo = v.toLowerCase().trim(); if (lo === 'yes') return 'text-emerald-700 bg-emerald-50 font-black'; if (lo === 'no') return 'text-red-600 bg-red-50 font-black'; if (lo === 'n/a') return 'text-slate-400'; return '' }
                   return (
-                    <tr key={feat.id} className={feat.isFirst ? 'border-t-2 border-slate-200' : ''}>
-                      <td className="border border-slate-100 px-2 py-2 text-[9px] font-bold text-slate-500 bg-slate-50">{feat.isFirst ? feat.catName : ''}</td>
+                    <tr key={feat.id} className={`${feat.isFirst ? 'border-t-2 border-slate-200' : ''} ${isDiff ? '' : 'opacity-60'}`}>
+                      <td className="border border-slate-100 px-2 py-2 text-[9px] font-bold text-slate-500 bg-slate-50 whitespace-nowrap overflow-hidden text-ellipsis">{feat.isFirst ? feat.catName : ''}</td>
                       <td className="border border-slate-100 px-2 py-2 text-[9px] text-slate-700">{getName(feat, lang)}</td>
                       <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${cls(v1)}`}>{display(v1)}</td>
                       <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${cls(v2)}`}>{display(v2)}</td>
                       <td className="border border-slate-100 px-2 py-1.5">
                         <div className="flex items-center justify-center gap-1">
-                          {/* Selector de signo — solo aparece cuando no se puede calcular automáticamente */}
+                          {/* Selector +/− siempre visible cuando no hay auto-sign */}
                           {!autoSign && (
-                            <div className="flex rounded-lg overflow-hidden border border-slate-200 text-[9px] font-black">
+                            <div className="flex rounded-lg overflow-hidden border border-slate-200 text-[9px] font-black shrink-0">
                               <button
                                 onClick={() => setSignoItems(prev => ({ ...prev, [feat.id]: signoManual === 1 ? 0 : 1 }))}
                                 className={`px-1.5 py-1 transition ${signoManual === 1 ? 'bg-emerald-500 text-white' : 'bg-white text-slate-400 hover:bg-emerald-50'}`}
-                                title="LIUX es mejor en esta característica">+</button>
+                                title="LIUX es mejor">+</button>
                               <button
                                 onClick={() => setSignoItems(prev => ({ ...prev, [feat.id]: signoManual === -1 ? 0 : -1 }))}
                                 className={`px-1.5 py-1 transition border-l border-slate-200 ${signoManual === -1 ? 'bg-red-500 text-white' : 'bg-white text-slate-400 hover:bg-red-50'}`}
-                                title="Competidor es mejor en esta característica">−</button>
+                                title="Competidor es mejor">−</button>
                             </div>
                           )}
                           <input
@@ -969,7 +960,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
             )}
           </div>
 
-          <button onClick={generateAnalysis} disabled={loading || diffRows.length === 0}
+          <button onClick={generateAnalysis} disabled={loading || allRows.length === 0}
             className="w-full bg-[#081224] text-white font-bold py-4 rounded-2xl hover:bg-[#162040] disabled:opacity-40 text-sm mb-6 flex items-center justify-center gap-2">
             {loading ? (<><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>Generando análisis...</>) : '✦ Generar argumento comercial con IA'}
           </button>
