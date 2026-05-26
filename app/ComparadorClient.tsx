@@ -777,7 +777,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
         valor_m1: getVal(feat.id, model1.id),
         valor_m2: getVal(feat.id, model2.id),
         ajuste: calcAjuste(feat)
-      })).filter(a => a.ajuste !== 0)
+      })).filter((a: any) => a.ajuste !== 0)
 
       const res = await fetch('/api/valor-cliente', {
         method: 'POST',
