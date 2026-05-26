@@ -25,6 +25,9 @@ const LANGS: { code: Lang, flag: string, label: string }[] = [
   { code: 'it', flag: '🇮🇹', label: 'IT' },
 ]
 
+// ID de la feature Autonomía WMTC
+const AUTONOMIA_FEATURE_NAME = 'Driving Mileage under WMTC mode (km)'
+
 function getName(item: any, lang: Lang) {
   if (lang === 'es' && item.name_es) return item.name_es
   if (lang === 'it' && item.name_it) return item.name_it
@@ -669,7 +672,10 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
   const [segment, setSegment] = useState('')
   const [model1Id, setModel1Id] = useState('')
   const [model2Id, setModel2Id] = useState('')
+  // valorItems: valores específicos para esta comparativa (model1+model2)
   const [valorItems, setValorItems] = useState<Record<string, number>>({})
+  // precioKm: precio por km para la fórmula de autonomía (específico por comparativa)
+  const [precioKm, setPrecioKm] = useState<number>(16)
   const [signoItems, setSignoItems] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -683,19 +689,60 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
   const model1 = modelsInSegment.find((m: any) => m.id === model1Id)
   const model2 = modelsInSegment.find((m: any) => m.id === model2Id)
 
+  // Feature de autonomía
+  const autonomiaFeat = features.find((f: any) => f.name === AUTONOMIA_FEATURE_NAME)
+
   useEffect(() => { setModel1Id(''); setModel2Id(''); setAnalysis(''); setError('') }, [segment])
 
+  // Cargar valores cuando cambia el par de vehículos
   useEffect(() => {
-    async function loadValorItems() {
-      const { data } = await supabase.from('valor_cliente_items').select('*')
-      if (data) {
-        const map: Record<string, number> = {}
-        data.forEach((d: any) => { map[d.feature_id] = d.valor_default })
-        setValorItems(map)
+    if (!model1Id || !model2Id) return
+    loadValoresParaComparativa(model1Id, model2Id)
+  }, [model1Id, model2Id])
+
+  async function loadValoresParaComparativa(m1id: string, m2id: string) {
+    // 1. Cargar defaults globales
+    const { data: defaults } = await supabase.from('valor_cliente_items').select('*')
+    const defaultMap: Record<string, number> = {}
+    let defaultPrecioKm = 16
+    if (defaults) {
+      defaults.forEach((d: any) => {
+        defaultMap[d.feature_id] = d.valor_default
+        if (autonomiaFeat && d.feature_id === autonomiaFeat.id && d.precio_km) {
+          defaultPrecioKm = d.precio_km
+        }
+      })
+    }
+
+    // 2. Cargar valores específicos para este par
+    const { data: especificos } = await supabase
+      .from('valor_cliente_comparativas')
+      .select('*')
+      .eq('model1_id', m1id)
+      .eq('model2_id', m2id)
+
+    // 3. Merge: específicos sobreescriben defaults
+    const merged = { ...defaultMap }
+    let especificoPrecioKm: number | null = null
+    if (especificos) {
+      especificos.forEach((e: any) => {
+        merged[e.feature_id] = e.valor
+        // precio_km se guarda en feature_id especial: autonomiaFeat?.id + '_precioKm'
+        // Lo guardamos en la fila de autonomía con valor = precioKm
+      })
+      // precio_km específico: buscar en tabla con feature_id = autonomiaFeat?.id
+      if (autonomiaFeat) {
+        const autRow = especificos.find((e: any) => e.feature_id === autonomiaFeat.id)
+        // El precio_km lo guardamos como campo especial en valor = precio_km cuando feature es autonomía
+        // Usamos una convención: si hay registro en comparativas para autonomía, su valor ES el precio_km
+        if (autRow) especificoPrecioKm = autRow.valor
       }
     }
-    loadValorItems()
-  }, [])
+
+    setValorItems(merged)
+    setPrecioKm(especificoPrecioKm ?? defaultPrecioKm)
+    setSignoItems({})
+  }
 
   function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 3000) }
 
@@ -704,24 +751,14 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
     return v ? v.value : '—'
   }
 
-  const isBoolean = (v: string) => {
-    const lo = v.toLowerCase().trim()
-    return lo === 'yes' || lo === 'no' || lo === 'sí' || lo === 'si'
-  }
+  const isBoolean = (v: string) => { const lo = v.toLowerCase().trim(); return lo === 'yes' || lo === 'no' || lo === 'sí' || lo === 'si' }
+  const isPositive = (v: string) => { const lo = v.toLowerCase().trim(); return lo === 'yes' || lo === 'sí' || lo === 'si' }
+  const isNumericPure = (v: string) => { const n = parseFloat(v.trim()); return !isNaN(n) && v.trim() !== '' }
 
-  const isPositive = (v: string) => {
-    const lo = v.toLowerCase().trim()
-    return lo === 'yes' || lo === 'sí' || lo === 'si'
-  }
-
-  const isNumericPure = (v: string) => {
-    const n = parseFloat(v.trim())
-    return !isNaN(n) && v.trim() !== ''
-  }
-
-  // Auto-sign: SOLO si ambos son booleanos O ambos son numéricos puros y distintos
   function canAutoSign(feat: any): boolean {
     if (!model1 || !model2) return false
+    // Autonomía usa fórmula propia, no auto-sign normal
+    if (feat.name === AUTONOMIA_FEATURE_NAME) return true
     const v1 = getVal(feat.id, model1.id)
     const v2 = getVal(feat.id, model2.id)
     if (v1 === v2) return false
@@ -732,37 +769,37 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
 
   function calcAjuste(feat: any): number {
     if (!model1 || !model2) return 0
+
+    // FÓRMULA ESPECIAL: Autonomía WMTC
+    if (feat.name === AUTONOMIA_FEATURE_NAME) {
+      const km1 = parseFloat(getVal(feat.id, model1.id))
+      const km2 = parseFloat(getVal(feat.id, model2.id))
+      if (isNaN(km1) || isNaN(km2)) return 0
+      return Math.round((km1 - km2) * precioKm)
+    }
+
     const valor = valorItems[feat.id] || 0
     if (valor === 0) return 0
-
     const v1 = getVal(feat.id, model1.id)
     const v2 = getVal(feat.id, model2.id)
 
-    // Signo manual tiene prioridad siempre
     const signoManual = signoItems[feat.id]
     if (signoManual !== undefined && signoManual !== 0) return signoManual * valor
 
-    // Auto booleanos: ambos deben ser booleanos
     if (isBoolean(v1) && isBoolean(v2)) {
       if (isPositive(v1) && !isPositive(v2)) return +valor
       if (!isPositive(v1) && isPositive(v2)) return -valor
       return 0
     }
-
-    // Auto numéricos: ambos deben ser numéricos puros
     if (isNumericPure(v1) && isNumericPure(v2)) {
-      const n1 = parseFloat(v1)
-      const n2 = parseFloat(v2)
+      const n1 = parseFloat(v1); const n2 = parseFloat(v2)
       if (n1 > n2) return +valor
       if (n1 < n2) return -valor
       return 0
     }
-
-    // Cualquier otro caso: necesita signo manual → no aplica ajuste sin él
     return 0
   }
 
-  // TODAS las filas igual que la ficha completa
   const allRows = model1 && model2 ? categories.flatMap((cat: any) => {
     const feats = features.filter((f: any) => f.category_id === cat.id)
     return feats.map((f: any, fi: number) => ({ ...f, catName: getName(cat, lang), isFirst: fi === 0 }))
@@ -773,12 +810,32 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
   const precioEstimado = precioBase - ajusteTotal
 
   async function saveValorItems() {
+    if (!model1 || !model2) return
     setSaving(true)
-    const upserts = Object.entries(valorItems).map(([feature_id, valor_default]) => ({ feature_id, valor_default }))
-    for (const u of upserts) {
-      await supabase.from('valor_cliente_items').upsert(u, { onConflict: 'feature_id' })
-    }
-    toast('Valores guardados ✓')
+    try {
+      // Guardar valores específicos para este par
+      for (const [feature_id, valor] of Object.entries(valorItems)) {
+        // No guardar autonomía como valor normal (tiene su propio precio_km)
+        if (autonomiaFeat && feature_id === autonomiaFeat.id) continue
+        await supabase.from('valor_cliente_comparativas').upsert(
+          { model1_id: model1.id, model2_id: model2.id, feature_id, valor },
+          { onConflict: 'model1_id,model2_id,feature_id' }
+        )
+      }
+      // Guardar precio_km para autonomía en esta comparativa
+      if (autonomiaFeat) {
+        await supabase.from('valor_cliente_comparativas').upsert(
+          { model1_id: model1.id, model2_id: model2.id, feature_id: autonomiaFeat.id, valor: precioKm },
+          { onConflict: 'model1_id,model2_id,feature_id' }
+        )
+        // También actualizar el default global de precio_km
+        await supabase.from('valor_cliente_items').upsert(
+          { feature_id: autonomiaFeat.id, valor_default: valorItems[autonomiaFeat.id] || 0, precio_km: precioKm },
+          { onConflict: 'feature_id' }
+        )
+      }
+      toast('Valores guardados ✓')
+    } catch { toast('Error al guardar') }
     setSaving(false)
   }
 
@@ -884,7 +941,7 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
                 <col style={{ width: '190px' }} />
                 <col style={{ width: '100px' }} />
                 <col style={{ width: '100px' }} />
-                <col style={{ width: '150px' }} />
+                <col style={{ width: '170px' }} />
               </colgroup>
               <thead>
                 <tr>
@@ -901,54 +958,68 @@ function ValorCliente({ models, categories, features, values, lang }: any) {
                   const v2 = getVal(feat.id, model2.id)
                   const ajuste = calcAjuste(feat)
                   const isDiff = v1 !== v2
+                  const isAutonomia = feat.name === AUTONOMIA_FEATURE_NAME
                   const auto = canAutoSign(feat)
                   const signoManual = signoItems[feat.id]
-                  const displayVal = (v: string) => {
-                    const lo = v.toLowerCase().trim()
-                    if (lo === 'yes') return '✓'
-                    if (lo === 'no') return '✗'
-                    return v
-                  }
-                  const clsVal = (v: string) => {
-                    const lo = v.toLowerCase().trim()
-                    if (lo === 'yes') return 'text-emerald-700 bg-emerald-50 font-black'
-                    if (lo === 'no') return 'text-red-600 bg-red-50 font-black'
-                    if (lo === 'n/a') return 'text-slate-400'
-                    return ''
-                  }
+                  const displayVal = (v: string) => { const lo = v.toLowerCase().trim(); if (lo === 'yes') return '✓'; if (lo === 'no') return '✗'; return v }
+                  const clsVal = (v: string) => { const lo = v.toLowerCase().trim(); if (lo === 'yes') return 'text-emerald-700 bg-emerald-50 font-black'; if (lo === 'no') return 'text-red-600 bg-red-50 font-black'; if (lo === 'n/a') return 'text-slate-400'; return '' }
+
                   return (
-                    <tr key={feat.id} className={`${feat.isFirst ? 'border-t-2 border-slate-200' : ''} ${!isDiff ? 'opacity-50' : ''}`}>
+                    <tr key={feat.id} className={`${feat.isFirst ? 'border-t-2 border-slate-200' : ''} ${!isDiff && !isAutonomia ? 'opacity-50' : ''}`}>
                       <td className="border border-slate-100 px-2 py-2 text-[9px] font-bold text-slate-500 bg-slate-50 whitespace-nowrap overflow-hidden text-ellipsis">{feat.isFirst ? feat.catName : ''}</td>
                       <td className="border border-slate-100 px-2 py-2 text-[9px] text-slate-700">{getName(feat, lang)}</td>
                       <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${clsVal(v1)}`}>{displayVal(v1)}</td>
                       <td className={`border border-slate-100 px-2 py-2 text-center text-[9px] ${clsVal(v2)}`}>{displayVal(v2)}</td>
                       <td className="border border-slate-100 px-2 py-1.5">
-                        <div className="flex items-center justify-center gap-1">
-                          {/* Selector +/− cuando NO hay auto-sign (tipos mixtos, texto libre, iguales) */}
-                          {!auto && (
-                            <div className="flex rounded-lg overflow-hidden border border-slate-200 text-[9px] font-black shrink-0">
-                              <button
-                                onClick={() => setSignoItems(prev => ({ ...prev, [feat.id]: signoManual === 1 ? 0 : 1 }))}
-                                className={`px-1.5 py-1 transition ${signoManual === 1 ? 'bg-emerald-500 text-white' : 'bg-white text-slate-400 hover:bg-emerald-50'}`}
-                                title="LIUX es mejor en esta característica">+</button>
-                              <button
-                                onClick={() => setSignoItems(prev => ({ ...prev, [feat.id]: signoManual === -1 ? 0 : -1 }))}
-                                className={`px-1.5 py-1 transition border-l border-slate-200 ${signoManual === -1 ? 'bg-red-500 text-white' : 'bg-white text-slate-400 hover:bg-red-50'}`}
-                                title="Competidor es mejor en esta característica">−</button>
+                        {isAutonomia ? (
+                          // FILA ESPECIAL: Autonomía con fórmula
+                          <div className="flex items-center justify-center gap-1.5">
+                            <div className="flex items-center gap-1">
+                              <span className="text-[8px] text-slate-400 whitespace-nowrap">€/km</span>
+                              <input
+                                type="number"
+                                value={precioKm}
+                                onChange={e => setPrecioKm(parseFloat(e.target.value) || 0)}
+                                className="w-12 border border-slate-200 rounded-lg px-1.5 py-1 text-xs text-center outline-none focus:border-blue-400"
+                              />
                             </div>
-                          )}
-                          <input
-                            type="number"
-                            value={valorItems[feat.id] ?? 0}
-                            onChange={e => setValorItems(prev => ({ ...prev, [feat.id]: parseFloat(e.target.value) || 0 }))}
-                            className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center outline-none focus:border-blue-400"
-                          />
-                          {ajuste !== 0 && (
-                            <span className={`text-[9px] font-black whitespace-nowrap ${ajuste > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                              {ajuste > 0 ? '+' : ''}{ajuste}€
+                            {ajuste !== 0 && (
+                              <span className={`text-[9px] font-black whitespace-nowrap ${ajuste > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                {ajuste > 0 ? '+' : ''}{ajuste}€
+                              </span>
+                            )}
+                            <span className="text-[8px] text-slate-300 whitespace-nowrap hidden md:inline">
+                              ({parseFloat(v1) || 0}-{parseFloat(v2) || 0})×{precioKm}
                             </span>
-                          )}
-                        </div>
+                          </div>
+                        ) : (
+                          // FILA NORMAL
+                          <div className="flex items-center justify-center gap-1">
+                            {!auto && (
+                              <div className="flex rounded-lg overflow-hidden border border-slate-200 text-[9px] font-black shrink-0">
+                                <button
+                                  onClick={() => setSignoItems(prev => ({ ...prev, [feat.id]: signoManual === 1 ? 0 : 1 }))}
+                                  className={`px-1.5 py-1 transition ${signoManual === 1 ? 'bg-emerald-500 text-white' : 'bg-white text-slate-400 hover:bg-emerald-50'}`}
+                                  title="LIUX es mejor">+</button>
+                                <button
+                                  onClick={() => setSignoItems(prev => ({ ...prev, [feat.id]: signoManual === -1 ? 0 : -1 }))}
+                                  className={`px-1.5 py-1 transition border-l border-slate-200 ${signoManual === -1 ? 'bg-red-500 text-white' : 'bg-white text-slate-400 hover:bg-red-50'}`}
+                                  title="Competidor es mejor">−</button>
+                              </div>
+                            )}
+                            <input
+                              type="number"
+                              value={valorItems[feat.id] ?? 0}
+                              onChange={e => setValorItems(prev => ({ ...prev, [feat.id]: parseFloat(e.target.value) || 0 }))}
+                              className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center outline-none focus:border-blue-400"
+                            />
+                            {ajuste !== 0 && (
+                              <span className={`text-[9px] font-black whitespace-nowrap ${ajuste > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                {ajuste > 0 ? '+' : ''}{ajuste}€
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   )
