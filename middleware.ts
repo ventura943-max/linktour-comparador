@@ -10,7 +10,15 @@ export function middleware(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.some(p => pathname.startsWith(p))
   if (isPublic) return NextResponse.next()
 
+  const isApiRoute = pathname.startsWith('/api/')
+
   if (!session) {
+    if (isApiRoute) {
+      return NextResponse.json(
+        { error: 'Sesión expirada. Por favor, vuelve a iniciar sesión.' },
+        { status: 401 }
+      )
+    }
     return NextResponse.redirect(new URL('/admin/login', request.url))
   }
 
