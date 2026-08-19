@@ -39,6 +39,27 @@ function formatDate(iso: string) {
   return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+// Descarga una imagen y la convierte a data URL PNG mediante canvas.
+// Normalizar a PNG es clave: jsPDF no soporta WebP, y así aceptamos cualquier formato.
+// Si algo falla (red, CORS, imagen corrupta) devuelve null y la card se dibuja sin imagen.
+async function imageToDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const blob = await res.blob()
+    const bitmap = await createImageBitmap(blob)
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(bitmap, 0, 0)
+    return canvas.toDataURL('image/png')
+  } catch {
+    return null
+  }
+}
+
 function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMobileOpen, lang, setLang, t }: any) {
   const items = [
     { id: 'comparador', label: t.comparador, icon: <IconComparador /> },
@@ -105,6 +126,7 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>(models.slice(0, 3).map((m: any) => m.id))
   const [showPicker, setShowPicker] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
   const pickerRef = useRef<HTMLDivElement>(null)
   const selectedModels = models.filter((m: any) => selectedIds.includes(m.id))
   const availableModels = models.filter((m: any) => !selectedIds.includes(m.id))
@@ -160,13 +182,22 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
     saveAs(new Blob([buf], { type: 'application/octet-stream' }), `comparativa-${nombres}-${fecha}.xlsx`)
   }
 
-  function exportComparadorPDF() {
-    // 1. Modelos seleccionados, en el mismo orden que las columnas de la tabla
-    const modelosPdf: PdfModelo[] = selectedModels.map((m: any) => ({
+  async function exportComparadorPDF() {
+    setExportingPdf(true)
+    try {
+    // 1. Modelos seleccionados, en el mismo orden que las columnas de la tabla.
+    //    Se descargan las imágenes en paralelo y se construyen las specs de la
+    //    card con los mismos campos configurables que muestra la web.
+    const modelosPdf: PdfModelo[] = await Promise.all(selectedModels.map(async (m: any) => ({
       marca: m.brand,
       modelo: m.name,
       version: m.version || '',
-    }))
+      imgDataUrl: m.img_url ? await imageToDataUrl(m.img_url) : null,
+      specs: activeCardFields.map((field: any) => ({
+        label: field.label,
+        value: String(specVal(field.feature_name, m.id)),
+      })),
+    })))
 
     // 2. Agrupar filteredFeatures (que ya respeta filtro de categoría y buscador)
     //    en categorías, manteniendo el orden original. Agrupamos por catId
@@ -200,6 +231,9 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
       subtitulo: `${t.comparadorSubtitle} · LIUX`,
       nombreArchivo: `comparativa-${nombres}-${fecha}.pdf`,
     })
+    } finally {
+      setExportingPdf(false)
+    }
   }
 
   return (
@@ -266,10 +300,10 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
             Excel
           </button>
-          <button onClick={exportComparadorPDF} title="Descargar PDF"
-            className="flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-full transition whitespace-nowrap">
+          <button onClick={exportComparadorPDF} disabled={exportingPdf} title="Descargar PDF"
+            className="flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-full transition whitespace-nowrap disabled:opacity-50">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            PDF
+            {exportingPdf ? 'Generando…' : 'PDF'}
           </button>
         </div>
       </div>

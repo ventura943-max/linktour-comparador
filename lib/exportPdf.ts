@@ -1,6 +1,7 @@
-// lib/exportPdf.ts
+// lib/exportPdf.ts (v2)
 // Exportación a PDF del Comparador LIUX
 // - PDF vectorial (texto real, no imagen)
+// - Cards de los vehículos comparados en la cabecera (imagen + specs)
 // - Una tabla por categoría con pageBreak: 'avoid' => una categoría nunca se corta
 //   entre páginas (salvo que ocupe más de una página completa, en cuyo caso
 //   repite cabeceras en la continuación)
@@ -11,10 +12,17 @@ import autoTable, { RowInput, CellHookData } from 'jspdf-autotable';
 
 // ============ TIPOS DE ENTRADA ============
 
+export interface PdfModelSpec {
+  label: string;            // p.ej. "Autonomía WMTC"
+  value: string;            // p.ej. "270"
+}
+
 export interface PdfModelo {
-  marca: string;      // p.ej. "LIUX"
-  modelo: string;     // p.ej. "BIG"
-  version: string;    // p.ej. "20"
+  marca: string;            // p.ej. "LIUX"
+  modelo: string;           // p.ej. "BIG"
+  version: string;          // p.ej. "20"
+  imgDataUrl?: string | null; // imagen en base64 (data URL PNG/JPEG), opcional
+  specs?: PdfModelSpec[];   // campos de la card (los mismos que la web)
 }
 
 export interface PdfFila {
@@ -43,7 +51,123 @@ const COLOR = {
   crossBg: [254, 226, 226] as [number, number, number],    // red-100
   crossFg: [220, 38, 38] as [number, number, number],      // red-600
   muted: [148, 163, 184] as [number, number, number],      // slate-400 (guiones "—")
+  cardImgBg: [248, 250, 252] as [number, number, number],  // slate-50 (fondo imagen card)
+  darkText: [15, 23, 42] as [number, number, number],      // slate-900 (nombre modelo)
 };
+
+// ============ UTILIDADES ============
+
+// Recorta un texto con "…" si excede el ancho disponible (en mm).
+// IMPORTANTE: la fuente y el tamaño deben estar ya fijados en el doc.
+function fitText(doc: jsPDF, text: string, maxW: number): string {
+  if (doc.getTextWidth(text) <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && doc.getTextWidth(t + '…') > maxW) t = t.slice(0, -1);
+  return t + '…';
+}
+
+// ============ CARDS DE VEHÍCULOS ============
+
+// Dibuja las cards de los modelos comparados y devuelve la coordenada Y
+// donde terminan (para colocar las tablas debajo).
+function drawModelCards(
+  doc: jsPDF,
+  modelos: PdfModelo[],
+  margin: number,
+  startY: number,
+  tableW: number
+): number {
+  const gap = 4;
+  const n = modelos.length;
+  const cardW = Math.min(58, (tableW - gap * (n - 1)) / n);
+  const pad = 3;
+  const imgH = 20;
+  const specLineH = 3.8;
+  const maxSpecs = Math.max(0, ...modelos.map((m) => m.specs?.length ?? 0));
+  const cardH = pad + 3.2 + 4.6 + 1.5 + imgH + 2 + maxSpecs * specLineH + pad;
+
+  modelos.forEach((m, i) => {
+    const x = margin + i * (cardW + gap);
+    let y = startY;
+
+    // Contorno de la card
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(...COLOR.border);
+    doc.setLineWidth(0.25);
+    doc.roundedRect(x, y, cardW, cardH, 2, 2, 'FD');
+
+    // Marca (azul, pequeño, mayúsculas)
+    y += pad + 2.4;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6);
+    doc.setTextColor(...COLOR.featureText);
+    doc.text(fitText(doc, m.marca.toUpperCase(), cardW - pad * 2), x + pad, y);
+
+    // Nombre del modelo (negrita, oscuro)
+    y += 4.2;
+    doc.setFontSize(9);
+    doc.setTextColor(...COLOR.darkText);
+    const nombre = `${m.modelo} ${m.version}`.trim();
+    doc.text(fitText(doc, nombre, cardW - pad * 2), x + pad, y);
+
+    // Caja de imagen (fondo slate-50)
+    y += 1.9;
+    const imgBoxX = x + pad;
+    const imgBoxW = cardW - pad * 2;
+    doc.setFillColor(...COLOR.cardImgBg);
+    doc.roundedRect(imgBoxX, y, imgBoxW, imgH, 1.5, 1.5, 'F');
+
+    if (m.imgDataUrl) {
+      try {
+        const props = doc.getImageProperties(m.imgDataUrl);
+        const ratio = props.width / props.height;
+        // Encajar la imagen dentro de la caja preservando la proporción
+        let w = imgBoxW - 2;
+        let h = w / ratio;
+        if (h > imgH - 2) { h = imgH - 2; w = h * ratio; }
+        doc.addImage(m.imgDataUrl, 'PNG', imgBoxX + (imgBoxW - w) / 2, y + (imgH - h) / 2, w, h);
+      } catch {
+        // Imagen corrupta o formato no soportado: placeholder
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.setTextColor(...COLOR.muted);
+        doc.text('—', imgBoxX + imgBoxW / 2, y + imgH / 2 + 1, { align: 'center' });
+      }
+    } else {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(...COLOR.muted);
+      doc.text('—', imgBoxX + imgBoxW / 2, y + imgH / 2 + 1, { align: 'center' });
+    }
+
+    // Specs (etiqueta a la izquierda, valor en negrita a la derecha)
+    y += imgH + 3.2;
+    (m.specs ?? []).forEach((spec) => {
+      // Línea separadora fina encima de cada spec (como en la web)
+      doc.setDrawColor(...COLOR.border);
+      doc.setLineWidth(0.1);
+      doc.line(x + pad, y - 2.6, x + cardW - pad, y - 2.6);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5.8);
+      doc.setTextColor(...COLOR.muted);
+      // El valor tiene prioridad de espacio; la etiqueta se recorta si hace falta
+      doc.setFont('helvetica', 'bold');
+      const valTxt = fitText(doc, spec.value, (cardW - pad * 2) * 0.45);
+      const valW = doc.getTextWidth(valTxt);
+      doc.setFont('helvetica', 'normal');
+      const labelTxt = fitText(doc, spec.label, cardW - pad * 2 - valW - 2);
+
+      doc.text(labelTxt, x + pad, y);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...COLOR.darkText);
+      doc.text(valTxt, x + cardW - pad, y, { align: 'right' });
+      y += specLineH;
+    });
+  });
+
+  return startY + cardH;
+}
 
 // ============ FUNCIÓN PRINCIPAL ============
 
@@ -84,7 +208,9 @@ export function exportarComparativaPDF(
   });
   doc.text(`Generado el ${fecha}`, pageW - margin, 19, { align: 'right' });
 
-  let cursorY = 32;
+  // ---------- Cards de los vehículos comparados ----------
+  const cardsBottom = drawModelCards(doc, modelos, margin, 32, tableW);
+  let cursorY = cardsBottom + 6;
 
   // ---------- Una tabla por categoría ----------
   for (const categoria of categorias) {
