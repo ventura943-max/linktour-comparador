@@ -127,6 +127,7 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   const [selectedIds, setSelectedIds] = useState<string[]>(models.slice(0, 3).map((m: any) => m.id))
   const [showPicker, setShowPicker] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
+  const [sources, setSources] = useState<any[]>([])
   const pickerRef = useRef<HTMLDivElement>(null)
   const selectedModels = models.filter((m: any) => selectedIds.includes(m.id))
   const availableModels = models.filter((m: any) => !selectedIds.includes(m.id))
@@ -138,6 +139,18 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
+
+  // Cargar todas las fuentes de datos (una vez). Se filtran por modelo al usarlas.
+  useEffect(() => {
+    supabase.from('model_sources').select('*').order('sort_order').then(({ data }) => {
+      if (data) setSources(data)
+    })
+  }, [])
+
+  // Fuentes de un modelo concreto, ordenadas
+  function sourcesFor(modelId: string) {
+    return sources.filter((s: any) => s.model_id === modelId).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
+  }
 
   function val(featId: string, modelId: string) {
     const v = values.find((v: any) => v.feature_id === featId && v.model_id === modelId)
@@ -196,6 +209,11 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
       specs: activeCardFields.map((field: any) => ({
         label: field.label,
         value: String(specVal(field.feature_name, m.id)),
+      })),
+      fuentes: sourcesFor(m.id).map((s: any) => ({
+        label: s.label || s.url,
+        url: s.url,
+        esPdf: /\.pdf($|\?)/i.test(s.url),
       })),
     })))
 
@@ -352,6 +370,48 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
           </tbody>
         </table>
       </div>
+
+      {/* BLOQUE DE FUENTES */}
+      {selectedModels.some((m: any) => sourcesFor(m.id).length > 0) && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-md mt-6 overflow-hidden">
+          <div className="bg-[#081224] px-5 py-3">
+            <span className="text-xs font-black text-white uppercase tracking-wider">Fuentes de datos</span>
+          </div>
+          <div className="p-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {selectedModels.map((m: any) => {
+              const srcs = sourcesFor(m.id)
+              if (srcs.length === 0) return null
+              return (
+                <div key={m.id} className="border border-slate-100 rounded-xl p-4">
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <span className="text-[9px] font-black tracking-widest text-blue-600 uppercase">{m.brand}</span>
+                    <span className="text-sm font-black tracking-tight">{m.version || m.name}</span>
+                  </div>
+                  <ul className="space-y-2">
+                    {srcs.map((s: any) => {
+                      const isPdf = /\.pdf($|\?)/i.test(s.url)
+                      return (
+                        <li key={s.id}>
+                          <a href={s.url} target="_blank" rel="noopener noreferrer"
+                            className="group flex items-start gap-2 text-sm text-slate-600 hover:text-blue-600 transition">
+                            <span className={`mt-0.5 shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded ${isPdf ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'}`}>
+                              {isPdf ? 'PDF' : 'WEB'}
+                            </span>
+                            <span className="flex-1 min-w-0">
+                              <span className="block font-medium group-hover:underline">{s.label || s.url}</span>
+                              {s.label && <span className="block text-[11px] text-slate-400 truncate">{s.url}</span>}
+                            </span>
+                          </a>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

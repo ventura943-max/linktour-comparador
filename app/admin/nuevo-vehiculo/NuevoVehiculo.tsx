@@ -45,6 +45,17 @@ function Sidebar() {
   )
 }
 
+// Estructura de una fuente en el formulario. `id` solo existe si viene de la BD.
+// `file` solo existe si es un PDF recién seleccionado pendiente de subir.
+type SourceRow = {
+  id?: string
+  label: string
+  url: string
+  sort_order: number
+  file?: File | null      // PDF pendiente de subir (aún no está en Storage)
+  uploading?: boolean
+}
+
 export default function NuevoVehiculo() {
   const router = useRouter()
   const params = useSearchParams()
@@ -65,6 +76,10 @@ export default function NuevoVehiculo() {
     is_active:true, sort_order:0
   })
   const [values, setValues] = useState<Record<string,string>>({})
+
+  // FUENTES
+  const [sources, setSources] = useState<SourceRow[]>([])
+  const [deletedSourceIds, setDeletedSourceIds] = useState<string[]>([])
 
   useEffect(() => { loadData() }, [])
 
@@ -88,6 +103,8 @@ export default function NuevoVehiculo() {
         vals.forEach((v: any) => { map[v.feature_id] = v.value || '' })
         setValues(map)
       }
+      const { data: srcs } = await supabase.from('model_sources').select('*').eq('model_id', modelId).order('sort_order')
+      if (srcs) setSources(srcs.map((s: any) => ({ id: s.id, label: s.label || '', url: s.url || '', sort_order: s.sort_order || 0 })))
     }
   }
 
@@ -118,6 +135,40 @@ export default function NuevoVehiculo() {
     if (error) return null
     const { data } = supabase.storage.from('vehicles').getPublicUrl(path)
     return data.publicUrl
+  }
+
+  // ---------- GESTIÓN DE FUENTES ----------
+  function addSource() {
+    setSources(prev => [...prev, { label: '', url: '', sort_order: prev.length }])
+  }
+  function updateSource(idx: number, patch: Partial<SourceRow>) {
+    setSources(prev => prev.map((s, i) => i === idx ? { ...s, ...patch } : s))
+  }
+  function removeSource(idx: number) {
+    setSources(prev => {
+      const s = prev[idx]
+      if (s.id) setDeletedSourceIds(ids => [...ids, s.id!])
+      return prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, sort_order: i }))
+    })
+  }
+  function moveSource(idx: number, dir: -1 | 1) {
+    setSources(prev => {
+      const target = idx + dir
+      if (target < 0 || target >= prev.length) return prev
+      const copy = [...prev]
+      ;[copy[idx], copy[target]] = [copy[target], copy[idx]]
+      return copy.map((s, i) => ({ ...s, sort_order: i }))
+    })
+  }
+  // Selección de un PDF: se guarda el File y se rellena la etiqueta con el
+  // nombre del archivo si está vacía. La subida real ocurre en save().
+  function handleSourcePdfSelect(idx: number, e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setSources(prev => prev.map((s, i) => i === idx
+      ? { ...s, file, url: file.name, label: s.label || file.name.replace(/\.pdf$/i, '') }
+      : s))
+    e.target.value = ''
   }
 
   async function save() {
@@ -154,6 +205,34 @@ export default function NuevoVehiculo() {
     if (mid) {
       const upserts = Object.entries(values).filter(([, v]) => v !== '').map(([feature_id, value]) => ({ feature_id, model_id: mid, value }))
       if (upserts.length > 0) await supabase.from('feature_values').upsert(upserts, { onConflict: 'feature_id,model_id' })
+
+      // ----- Guardar fuentes -----
+      // 1. Borrar las que el usuario quitó
+      if (deletedSourceIds.length > 0) {
+        await supabase.from('model_sources').delete().in('id', deletedSourceIds)
+      }
+      // 2. Subir PDFs pendientes y preparar filas
+      for (let i = 0; i < sources.length; i++) {
+        const s = sources[i]
+        if (s.file) {
+          const ext = s.file.name.split('.').pop()
+          const path = `source_${model.brand}${model.name}${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`.toLowerCase().replace(/[^a-z0-9._]/g, '')
+          const url = await uploadFile(s.file, path)
+          if (url) { s.url = url; s.file = null }
+        }
+      }
+      // 3. Upsert de fuentes con URL válida
+      const validSources = sources.filter(s => s.url && s.url.trim() !== '' && !s.file)
+      for (const s of validSources) {
+        const row: any = {
+          model_id: mid,
+          label: s.label?.trim() || null,
+          url: s.url.trim(),
+          sort_order: s.sort_order,
+        }
+        if (s.id) row.id = s.id
+        await supabase.from('model_sources').upsert(row)
+      }
     }
 
     toast('Guardado ✓')
@@ -252,6 +331,80 @@ export default function NuevoVehiculo() {
               value={model.notes || ''}
               onChange={e => setModel({...model, notes:e.target.value})}
             />
+          </div>
+
+          {/* FUENTES */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm">
+            <h2 className="font-black text-base mb-2 text-slate-700 uppercase tracking-wider">Fuentes de datos</h2>
+            <p className="text-xs text-slate-400 mb-4">Enlaces o PDFs de donde proceden los datos de este vehículo (ficha oficial, vídeo, artículo…). Aparecerán como enlaces clicables en el comparador y en el PDF exportado.</p>
+
+            <div className="space-y-3">
+              {sources.map((s, idx) => {
+                const isPdf = !!s.file || /\.pdf($|\?)/i.test(s.url)
+                return (
+                  <div key={s.id || idx} className="border border-slate-200 rounded-xl p-3 bg-slate-50/50">
+                    <div className="flex items-start gap-2">
+                      {/* Botones de orden */}
+                      <div className="flex flex-col gap-0.5 pt-1">
+                        <button onClick={() => moveSource(idx, -1)} disabled={idx === 0}
+                          className="text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs leading-none">▲</button>
+                        <button onClick={() => moveSource(idx, 1)} disabled={idx === sources.length - 1}
+                          className="text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs leading-none">▼</button>
+                      </div>
+
+                      <div className="flex-1 space-y-2">
+                        {/* Etiqueta */}
+                        <input
+                          className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400"
+                          value={s.label}
+                          onChange={e => updateSource(idx, { label: e.target.value })}
+                          placeholder="Etiqueta (ej. Ficha técnica oficial, Vídeo YouTube)"
+                        />
+                        {/* URL o PDF */}
+                        {s.file ? (
+                          <div className="flex items-center gap-2 text-sm bg-white border border-slate-200 rounded-lg px-3 py-1.5">
+                            <span className="text-red-500 font-bold text-xs">PDF</span>
+                            <span className="flex-1 truncate text-slate-600">{s.file.name}</span>
+                            <span className="text-[10px] text-amber-500">Se subirá al guardar</span>
+                            <button onClick={() => updateSource(idx, { file: null, url: '' })} className="text-slate-400 hover:text-red-500">✕</button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <input
+                              className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400"
+                              value={s.url}
+                              onChange={e => updateSource(idx, { url: e.target.value })}
+                              placeholder="https://… (pega una URL)"
+                            />
+                            <span className="text-xs text-slate-400">o</span>
+                            <label className="cursor-pointer whitespace-nowrap text-xs font-bold text-blue-600 hover:text-blue-800 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50 transition">
+                              📄 Subir PDF
+                              <input type="file" accept="application/pdf" onChange={e => handleSourcePdfSelect(idx, e)} className="hidden" />
+                            </label>
+                          </div>
+                        )}
+                        {/* Vista previa del enlace si ya es una URL http */}
+                        {!s.file && s.url.startsWith('http') && (
+                          <a href={s.url} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-700 hover:underline truncate max-w-full">
+                            🔗 {s.url}
+                          </a>
+                        )}
+                      </div>
+
+                      {/* Borrar fuente */}
+                      <button onClick={() => removeSource(idx)}
+                        className="text-slate-300 hover:text-red-500 transition text-sm pt-1">🗑</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <button onClick={addSource}
+              className="w-full mt-3 border-2 border-dashed border-slate-200 rounded-xl py-3 text-sm font-bold text-slate-400 hover:border-blue-300 hover:text-blue-500 hover:bg-blue-50 transition">
+              + Añadir fuente
+            </button>
           </div>
 
           {/* CARACTERÍSTICAS */}

@@ -17,12 +17,19 @@ export interface PdfModelSpec {
   value: string;            // p.ej. "270"
 }
 
+export interface PdfFuente {
+  label: string;            // etiqueta legible (o la propia URL si no hay etiqueta)
+  url: string;              // enlace clicable
+  esPdf?: boolean;          // para pintar la insignia PDF/WEB
+}
+
 export interface PdfModelo {
   marca: string;            // p.ej. "LIUX"
   modelo: string;           // p.ej. "BIG"
   version: string;          // p.ej. "20"
   imgDataUrl?: string | null; // imagen en base64 (data URL PNG/JPEG), opcional
   specs?: PdfModelSpec[];   // campos de la card (los mismos que la web)
+  fuentes?: PdfFuente[];    // fuentes de datos (enlaces clicables)
 }
 
 export interface PdfFila {
@@ -167,6 +174,83 @@ function drawModelCards(
   });
 
   return startY + cardH;
+}
+
+// ============ BLOQUE DE FUENTES ============
+
+// Dibuja el bloque de fuentes al final del documento, con enlaces clicables.
+// Gestiona el salto de página si no cabe. Devuelve la Y final.
+function drawSourcesBlock(
+  doc: jsPDF,
+  modelos: PdfModelo[],
+  margin: number,
+  startY: number,
+  pageW: number,
+  pageH: number
+): number {
+  const modelosConFuentes = modelos.filter((m) => (m.fuentes?.length ?? 0) > 0);
+  if (modelosConFuentes.length === 0) return startY;
+
+  const bottomLimit = pageH - 14;
+  let y = startY + 4;
+
+  // Si no cabe ni la cabecera del bloque, nueva página
+  if (y + 16 > bottomLimit) { doc.addPage(); y = 20; }
+
+  // Cabecera del bloque (banda oscura)
+  doc.setFillColor(...COLOR.headerBg);
+  doc.rect(margin, y, pageW - margin * 2, 7, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(...COLOR.headerText);
+  doc.text('FUENTES DE DATOS', margin + 3, y + 4.8);
+  y += 7 + 4;
+
+  for (const m of modelosConFuentes) {
+    const fuentes = m.fuentes!;
+    // Alto estimado del bloque de este modelo (título + fuentes)
+    const needed = 6 + fuentes.length * 5.2 + 3;
+    if (y + needed > bottomLimit) { doc.addPage(); y = 20; }
+
+    // Nombre del modelo
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...COLOR.darkText);
+    doc.text(`${m.marca} ${m.modelo} ${m.version}`.trim(), margin, y);
+    y += 5;
+
+    for (const f of fuentes) {
+      if (y + 5.2 > bottomLimit) { doc.addPage(); y = 20; }
+
+      // Insignia PDF / WEB
+      const badge = f.esPdf ? 'PDF' : 'WEB';
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(5.5);
+      if (f.esPdf) {
+        doc.setFillColor(...COLOR.crossBg);
+        doc.setTextColor(...COLOR.crossFg);
+      } else {
+        doc.setFillColor(...COLOR.checkBg);
+        doc.setTextColor(...COLOR.featureText);
+      }
+      doc.roundedRect(margin + 2, y - 2.6, 7, 3.4, 0.6, 0.6, 'F');
+      doc.text(badge, margin + 5.5, y - 0.2, { align: 'center' });
+
+      // Etiqueta (o URL) como enlace clicable
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(...COLOR.featureText);
+      const texto = f.label || f.url;
+      const maxTextW = pageW - margin * 2 - 14;
+      const shown = fitText(doc, texto, maxTextW);
+      doc.textWithLink(shown, margin + 12, y, { url: f.url });
+
+      y += 5.2;
+    }
+    y += 3;
+  }
+
+  return y;
 }
 
 // ============ FUNCIÓN PRINCIPAL ============
@@ -324,6 +408,10 @@ export function exportarComparativaPDF(
     // Posición para la siguiente categoría (con separación de 4 mm)
     cursorY = (doc as any).lastAutoTable.finalY + 4;
   }
+
+  // ---------- Bloque de fuentes (enlaces clicables) ----------
+  const pageH = doc.internal.pageSize.getHeight();
+  drawSourcesBlock(doc, modelos, margin, cursorY, pageW, pageH);
 
   // ---------- Pie de página con numeración ----------
   const totalPaginas = doc.getNumberOfPages();
