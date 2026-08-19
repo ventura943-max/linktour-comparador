@@ -129,7 +129,13 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   const [exportingPdf, setExportingPdf] = useState(false)
   const [sources, setSources] = useState<any[]>([])
   const pickerRef = useRef<HTMLDivElement>(null)
-  const selectedModels = models.filter((m: any) => selectedIds.includes(m.id))
+  // Índice de la card que se está arrastrando y sobre la que se pasa (para feedback visual)
+  const dragCardIdx = useRef<number | null>(null)
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
+  // IMPORTANTE: mapeamos desde selectedIds (no filtramos models) para respetar
+  // el ORDEN en que el usuario ha colocado las cards. Este orden se propaga a la
+  // tabla, el Excel y el PDF, que todos recorren selectedModels.
+  const selectedModels = selectedIds.map((id: string) => models.find((m: any) => m.id === id)).filter(Boolean)
   const availableModels = models.filter((m: any) => !selectedIds.includes(m.id))
 
   useEffect(() => {
@@ -150,6 +156,30 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   // Fuentes de un modelo concreto, ordenadas
   function sourcesFor(modelId: string) {
     return sources.filter((s: any) => s.model_id === modelId).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
+  }
+
+  // ---------- Reordenar cards por arrastre ----------
+  // Se reordena selectedIds, que es el ORDEN ÚNICO que siguen las cards, la
+  // tabla, el Excel y el PDF. Cambiar aquí reordena todo automáticamente.
+  function onCardDragStart(idx: number) {
+    dragCardIdx.current = idx
+  }
+  function onCardDragOver(e: React.DragEvent, idx: number) {
+    e.preventDefault() // necesario para permitir el "drop"
+    if (dragCardIdx.current === null || dragCardIdx.current === idx) return
+    setDragOverIdx(idx)
+    setSelectedIds(prev => {
+      const from = dragCardIdx.current!
+      const updated = [...prev]
+      const [moved] = updated.splice(from, 1)
+      updated.splice(idx, 0, moved)
+      dragCardIdx.current = idx
+      return updated
+    })
+  }
+  function onCardDragEnd() {
+    dragCardIdx.current = null
+    setDragOverIdx(null)
   }
 
   function val(featId: string, modelId: string) {
@@ -260,9 +290,17 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
       <p className="text-slate-500 text-sm mb-6">{t.comparadorSubtitle}</p>
       <div className="overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 mb-8">
         <div className="flex gap-3 items-stretch" style={{ minWidth: 'max-content' }}>
-          {selectedModels.map((m: any) => (
-            <div key={m.id} className="bg-white rounded-2xl border border-slate-200 p-3 shadow-md w-40 shrink-0 relative group">
+          {selectedModels.map((m: any, idx: number) => (
+            <div key={m.id}
+              draggable
+              onDragStart={() => onCardDragStart(idx)}
+              onDragOver={e => onCardDragOver(e, idx)}
+              onDragEnd={onCardDragEnd}
+              className={`bg-white rounded-2xl border p-3 shadow-md w-40 shrink-0 relative group cursor-grab active:cursor-grabbing transition
+                ${dragOverIdx === idx ? 'border-blue-400 ring-2 ring-blue-200' : 'border-slate-200'}
+                ${dragCardIdx.current === idx ? 'opacity-40' : ''}`}>
               <button onClick={() => selectedIds.length > 1 && setSelectedIds(selectedIds.filter(x => x !== m.id))}
+                onMouseDown={e => e.stopPropagation()}
                 className="absolute top-2 right-2 w-5 h-5 rounded-full bg-slate-100 text-slate-400 hover:bg-red-100 hover:text-red-500 text-xs font-bold opacity-0 group-hover:opacity-100 transition flex items-center justify-center z-10">✕</button>
               <div className="text-[8px] font-black tracking-widest text-blue-600 uppercase">{m.brand} {m.name}</div>
               <div className="font-black text-base tracking-tight mb-2">{m.version || m.name}</div>
