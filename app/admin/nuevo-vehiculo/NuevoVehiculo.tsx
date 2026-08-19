@@ -76,6 +76,9 @@ export default function NuevoVehiculo() {
     is_active:true, sort_order:0
   })
   const [values, setValues] = useState<Record<string,string>>({})
+  // Copia de los valores tal como estaban en la BD al cargar. Sirve para
+  // detectar qué características se han vaciado y borrarlas al guardar.
+  const [initialValues, setInitialValues] = useState<Record<string,string>>({})
 
   // FUENTES
   const [sources, setSources] = useState<SourceRow[]>([])
@@ -102,6 +105,7 @@ export default function NuevoVehiculo() {
         const map: Record<string,string> = {}
         vals.forEach((v: any) => { map[v.feature_id] = v.value || '' })
         setValues(map)
+        setInitialValues(map)
       }
       const { data: srcs } = await supabase.from('model_sources').select('*').eq('model_id', modelId).order('sort_order')
       if (srcs) setSources(srcs.map((s: any) => ({ id: s.id, label: s.label || '', url: s.url || '', sort_order: s.sort_order || 0 })))
@@ -203,8 +207,19 @@ export default function NuevoVehiculo() {
     }
 
     if (mid) {
+      // 1. Guardar/actualizar las características con valor
       const upserts = Object.entries(values).filter(([, v]) => v !== '').map(([feature_id, value]) => ({ feature_id, model_id: mid, value }))
       if (upserts.length > 0) await supabase.from('feature_values').upsert(upserts, { onConflict: 'feature_id,model_id' })
+
+      // 2. Borrar las características que TENÍAN valor y ahora se han vaciado.
+      //    Sin esto, un dato borrado en el formulario reaparecía al recargar,
+      //    porque el upsert ignora los valores vacíos y la fila antigua persistía.
+      const toDelete = Object.keys(initialValues).filter(
+        (feature_id) => initialValues[feature_id] !== '' && (values[feature_id] ?? '') === ''
+      )
+      if (toDelete.length > 0) {
+        await supabase.from('feature_values').delete().eq('model_id', mid).in('feature_id', toDelete)
+      }
 
       // ----- Guardar fuentes -----
       // 1. Borrar las que el usuario quitó
