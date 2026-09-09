@@ -252,7 +252,9 @@ export default function NuevoVehiculo() {
 
     toast('Guardado ✓')
     setLoading(false)
-    setTimeout(() => router.push('/'), 1200)
+    // router.refresh() obliga a Next.js a volver a pedir modelos y valores al servidor,
+    // para que el Comparador vea el vehículo recién creado/editado sin necesidad de F5.
+    setTimeout(() => { router.refresh(); router.push('/') }, 1200)
   }
 
   const ic = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
@@ -269,7 +271,7 @@ export default function NuevoVehiculo() {
             <p className="text-xs text-slate-400">Los cambios se guardan al pulsar Guardar</p>
           </div>
           <div className="flex gap-3">
-            <button onClick={() => router.push('/')} className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">← Volver</button>
+            <button onClick={() => { router.refresh(); router.push('/') }} className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">← Volver</button>
             <button onClick={save} disabled={loading} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg hover:bg-[#162040] disabled:opacity-50">
               {loading ? 'Guardando...' : 'Guardar vehículo'}
             </button>
