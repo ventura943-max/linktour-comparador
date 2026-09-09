@@ -200,16 +200,21 @@ export default function NuevoVehiculo() {
     let mid = modelId
 
     if (modelId) {
-      await supabase.from('models').update(modelData).eq('id', modelId)
+      const { error } = await supabase.from('models').update(modelData).eq('id', modelId)
+      if (error) { toast('Error guardando el vehículo: ' + error.message); setLoading(false); return }
     } else {
-      const { data } = await supabase.from('models').insert(modelData).select().single()
-      mid = data?.id
+      const { data, error } = await supabase.from('models').insert(modelData).select().single()
+      if (error || !data) { toast('Error creando el vehículo: ' + (error?.message || '')); setLoading(false); return }
+      mid = data.id
     }
 
     if (mid) {
       // 1. Guardar/actualizar las características con valor
       const upserts = Object.entries(values).filter(([, v]) => v !== '').map(([feature_id, value]) => ({ feature_id, model_id: mid, value }))
-      if (upserts.length > 0) await supabase.from('feature_values').upsert(upserts, { onConflict: 'feature_id,model_id' })
+      if (upserts.length > 0) {
+        const { error } = await supabase.from('feature_values').upsert(upserts, { onConflict: 'feature_id,model_id' })
+        if (error) { toast('Error guardando características: ' + error.message); setLoading(false); return }
+      }
 
       // 2. Borrar las características que TENÍAN valor y ahora se han vaciado.
       //    Sin esto, un dato borrado en el formulario reaparecía al recargar,
