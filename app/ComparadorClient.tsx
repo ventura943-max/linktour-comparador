@@ -1,5 +1,6 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { translations, Lang, T } from '@/lib/i18n'
 import * as XLSX from 'xlsx'
@@ -521,6 +522,13 @@ function Categorias({ t }: { t: T }) {
   const [compareB, setCompareB] = useState<string>('')
   const [showCompare, setShowCompare] = useState(false)
   const [restoring, setRestoring] = useState(false)
+  const router = useRouter()
+  // Arrastre: índice de la categoría en movimiento / característica (dentro de su categoría)
+  const dragCat = useRef<number | null>(null)
+  const dragFeat = useRef<{ catId: string; idx: number } | null>(null)
+  const [savingOrder, setSavingOrder] = useState(false)
+
+  const bySort = (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
 
   useEffect(() => { loadAll() }, [])
   async function loadAll() {
@@ -534,25 +542,93 @@ function Categorias({ t }: { t: T }) {
     setVersions(v.data || [])
   }
   function toast(m: string) { setMsg(m); setTimeout(() => setMsg(''), 4000) }
+
+  // Los demás módulos reciben categorías/características del servidor al abrir la página.
+  // router.refresh() vuelve a pedirlas sin recargar la página ni perder el estado en pantalla.
+  function propagar() { router.refresh() }
+
+  // ---------- Reordenar categorías (arrastrar y soltar) ----------
+  function onCatDragStart(idx: number) { dragCat.current = idx }
+  function onCatDragOver(e: React.DragEvent, idx: number) {
+    e.preventDefault()
+    if (dragCat.current === null || dragCat.current === idx) return
+    setCategories(prev => {
+      const list = [...prev].sort(bySort)
+      const [moved] = list.splice(dragCat.current!, 1)
+      list.splice(idx, 0, moved)
+      dragCat.current = idx
+      return list.map((c, i) => ({ ...c, sort_order: i + 1 }))
+    })
+  }
+  async function onCatDragEnd() {
+    if (dragCat.current === null) return
+    dragCat.current = null
+    setSavingOrder(true)
+    const list = [...categories].sort(bySort)
+    // Renumeramos TODAS las categorías (1, 2, 3…) para que nunca haya empates
+    await Promise.all(list.map((c, i) => supabase.from('categories').update({ sort_order: i + 1 }).eq('id', c.id)))
+    setSavingOrder(false)
+    toast('Orden de categorías guardado ✓')
+    propagar()
+  }
+
+  // ---------- Reordenar características (dentro de su categoría) ----------
+  function onFeatDragStart(catId: string, idx: number) { dragFeat.current = { catId, idx } }
+  function onFeatDragOver(e: React.DragEvent, catId: string, idx: number) {
+    e.preventDefault()
+    const d = dragFeat.current
+    if (!d || d.catId !== catId || d.idx === idx) return
+    setFeatures(prev => {
+      const inCat = prev.filter(f => f.category_id === catId).sort(bySort)
+      const others = prev.filter(f => f.category_id !== catId)
+      const [moved] = inCat.splice(d.idx, 1)
+      inCat.splice(idx, 0, moved)
+      dragFeat.current = { catId, idx }
+      return [...others, ...inCat.map((f, i) => ({ ...f, sort_order: i + 1 }))]
+    })
+  }
+  async function onFeatDragEnd() {
+    const d = dragFeat.current
+    if (!d) return
+    dragFeat.current = null
+    setSavingOrder(true)
+    const inCat = features.filter(f => f.category_id === d.catId).sort(bySort)
+    await Promise.all(inCat.map((f, i) => supabase.from('features').update({ sort_order: i + 1 }).eq('id', f.id)))
+    setSavingOrder(false)
+    toast('Orden de características guardado ✓')
+    propagar()
+  }
+
   async function saveCat() {
     if (!catForm.name) { toast(t.nombreObligatorio); return }
-    if (editCatId) await supabase.from('categories').update(catForm).eq('id', editCatId)
-    else await supabase.from('categories').insert(catForm)
-    toast(t.guardado); setCatForm({ name: '', sort_order: 0 }); setEditCatId(null); loadAll()
+    if (editCatId) await supabase.from('categories').update({ name: catForm.name }).eq('id', editCatId)
+    else {
+      // Las categorías nuevas se colocan al final; luego se reordenan arrastrando
+      const maxOrder = categories.reduce((m, c) => Math.max(m, c.sort_order ?? 0), 0)
+      await supabase.from('categories').insert({ name: catForm.name, sort_order: maxOrder + 1 })
+    }
+    toast(t.guardado); setCatForm({ name: '', sort_order: 0 }); setEditCatId(null); await loadAll(); propagar()
   }
   async function deleteCat(id: string) {
     if (!confirm(t.eliminarCategoria)) return
-    await supabase.from('categories').delete().eq('id', id); toast(t.eliminado); loadAll()
+    await supabase.from('categories').delete().eq('id', id); toast(t.eliminado); await loadAll(); propagar()
   }
   async function saveFeat() {
     if (!featForm.name || !featForm.category_id) { toast(t.nombreCatObligatorio); return }
-    if (editFeatId) await supabase.from('features').update(featForm).eq('id', editFeatId)
-    else await supabase.from('features').insert(featForm)
-    toast(t.guardado); setFeatForm({ name: '', category_id: '', type: 'boolean', sort_order: 0 }); setEditFeatId(null); loadAll()
+    const maxInCat = features.filter(f => f.category_id === featForm.category_id).reduce((m, f) => Math.max(m, f.sort_order ?? 0), 0)
+    if (editFeatId) {
+      const original = features.find(f => f.id === editFeatId)
+      // Si cambia de categoría, se coloca al final de la nueva; si no, conserva su posición
+      const sort_order = original && original.category_id !== featForm.category_id ? maxInCat + 1 : (original?.sort_order ?? 0)
+      await supabase.from('features').update({ name: featForm.name, category_id: featForm.category_id, type: featForm.type, sort_order }).eq('id', editFeatId)
+    } else {
+      await supabase.from('features').insert({ name: featForm.name, category_id: featForm.category_id, type: featForm.type, sort_order: maxInCat + 1 })
+    }
+    toast(t.guardado); setFeatForm({ name: '', category_id: '', type: 'boolean', sort_order: 0 }); setEditFeatId(null); await loadAll(); propagar()
   }
   async function deleteFeat(id: string) {
     if (!confirm(t.eliminarCaracteristica)) return
-    await supabase.from('features').delete().eq('id', id); toast(t.eliminado); loadAll()
+    await supabase.from('features').delete().eq('id', id); toast(t.eliminado); await loadAll(); propagar()
   }
   function exportExcel() {
     const sortedCats = [...categories].sort((a, b) => a.sort_order - b.sort_order)
@@ -671,17 +747,23 @@ function Categorias({ t }: { t: T }) {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <h2 className="font-black text-base mb-4">{editCatId ? t.editarCategoria : t.añadirCategoria}</h2>
-            <div className="mb-3"><label className={lc}>{t.nombre}</label><input className={ic} value={catForm.name} onChange={e => setCatForm({ ...catForm, name: e.target.value })} /></div>
-            <div className="mb-4"><label className={lc}>{t.orden}</label><input type="number" className={ic} value={catForm.sort_order} onChange={e => setCatForm({ ...catForm, sort_order: parseInt(e.target.value) })} /></div>
+            <div className="mb-4"><label className={lc}>{t.nombre}</label><input className={ic} value={catForm.name} onChange={e => setCatForm({ ...catForm, name: e.target.value })} /></div>
             <div className="flex gap-2">{editCatId && <button onClick={() => { setEditCatId(null); setCatForm({ name: '', sort_order: 0 }) }} className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-500">{t.cancelar}</button>}<button onClick={saveCat} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg">{editCatId ? t.actualizar : t.añadir}</button></div>
+            <p className="text-xs text-slate-400 mt-4">Las categorías nuevas se añaden al final. Arrastra ⠿ en la lista para cambiar el orden: se guarda al soltar y se aplica a toda la herramienta.</p>
           </div>
           <div className="bg-white rounded-2xl p-6 shadow-sm">
-            <h2 className="font-black text-base mb-4">{t.categoriasTitle} ({categories.length})</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-black text-base">{t.categoriasTitle} ({categories.length})</h2>
+              <span className="text-xs text-slate-400">{savingOrder ? 'Guardando orden…' : 'Arrastra para reordenar'}</span>
+            </div>
             <div className="space-y-2">
-              {[...categories].sort((a, b) => a.sort_order - b.sort_order).map(c => (
-                <div key={c.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-xl hover:bg-slate-50">
-                  <div><div className="font-bold text-sm">{c.name}</div><div className="text-xs text-slate-400">{c.name_es && <span className="mr-2">ES: {c.name_es}</span>}{t.orden}: {c.sort_order}</div></div>
-                  <div className="flex gap-2"><button onClick={() => { setEditCatId(c.id); setCatForm(c) }} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏</button><button onClick={() => deleteCat(c.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button></div>
+              {[...categories].sort(bySort).map((c, idx) => (
+                <div key={c.id} draggable onDragStart={() => onCatDragStart(idx)} onDragOver={e => onCatDragOver(e, idx)} onDragEnd={onCatDragEnd}
+                  className="flex items-center gap-3 p-3 border border-slate-100 rounded-xl hover:bg-slate-50 cursor-grab active:cursor-grabbing">
+                  <div className="text-slate-300 text-lg select-none">⠿</div>
+                  <div className="w-5 text-xs font-bold text-slate-300">{idx + 1}</div>
+                  <div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{c.name}</div>{c.name_es && <div className="text-xs text-slate-400 truncate">ES: {c.name_es}</div>}</div>
+                  <div className="flex gap-2"><button onClick={() => { setEditCatId(c.id); setCatForm({ name: c.name, sort_order: c.sort_order }) }} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏</button><button onClick={() => deleteCat(c.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button></div>
                 </div>
               ))}
             </div>
@@ -693,17 +775,33 @@ function Categorias({ t }: { t: T }) {
           <div className="bg-white rounded-2xl p-6 shadow-sm">
             <h2 className="font-black text-base mb-4">{editFeatId ? t.editarCaracteristica : t.añadirCaracteristica}</h2>
             <div className="mb-3"><label className={lc}>{t.nombre}</label><input className={ic} value={featForm.name} onChange={e => setFeatForm({ ...featForm, name: e.target.value })} /></div>
-            <div className="mb-3"><label className={lc}>{t.categoria}</label><select className={ic} value={featForm.category_id} onChange={e => setFeatForm({ ...featForm, category_id: e.target.value })}><option value="">{t.selecciona}</option>{[...categories].sort((a, b) => a.sort_order - b.sort_order).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-            <div className="mb-3"><label className={lc}>{t.tipo}</label><select className={ic} value={featForm.type} onChange={e => setFeatForm({ ...featForm, type: e.target.value })}><option value="boolean">{t.siNo}</option><option value="text">{t.texto}</option><option value="numeric">{t.numerico}</option></select></div>
-            <div className="mb-4"><label className={lc}>{t.orden}</label><input type="number" className={ic} value={featForm.sort_order} onChange={e => setFeatForm({ ...featForm, sort_order: parseInt(e.target.value) })} /></div>
+            <div className="mb-3"><label className={lc}>{t.categoria}</label><select className={ic} value={featForm.category_id} onChange={e => setFeatForm({ ...featForm, category_id: e.target.value })}><option value="">{t.selecciona}</option>{[...categories].sort(bySort).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+            <div className="mb-4"><label className={lc}>{t.tipo}</label><select className={ic} value={featForm.type} onChange={e => setFeatForm({ ...featForm, type: e.target.value })}><option value="boolean">{t.siNo}</option><option value="text">{t.texto}</option><option value="numeric">{t.numerico}</option></select></div>
             <div className="flex gap-2">{editFeatId && <button onClick={() => { setEditFeatId(null); setFeatForm({ name: '', category_id: '', type: 'boolean', sort_order: 0 }) }} className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-500">{t.cancelar}</button>}<button onClick={saveFeat} className="px-6 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg">{editFeatId ? t.actualizar : t.añadir}</button></div>
+            <p className="text-xs text-slate-400 mt-4">Las características nuevas se añaden al final de su categoría. Arrastra ⠿ en la lista para reordenarlas dentro de la categoría; para moverla a otra categoría, edítala y cambia la categoría.</p>
           </div>
           <div className="bg-white rounded-2xl p-6 shadow-sm overflow-y-auto max-h-[600px]">
-            <h2 className="font-black text-base mb-4">{t.caracteristicas} ({features.length})</h2>
-            {[...categories].sort((a, b) => a.sort_order - b.sort_order).map(cat => {
-              const catFeats = [...features.filter(f => f.category_id === cat.id)].sort((a, b) => a.sort_order - b.sort_order)
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-black text-base">{t.caracteristicas} ({features.length})</h2>
+              <span className="text-xs text-slate-400">{savingOrder ? 'Guardando orden…' : 'Arrastra para reordenar'}</span>
+            </div>
+            {[...categories].sort(bySort).map(cat => {
+              const catFeats = [...features.filter(f => f.category_id === cat.id)].sort(bySort)
               if (!catFeats.length) return null
-              return (<div key={cat.id} className="mb-3"><div className="text-xs font-black text-slate-400 uppercase tracking-wider py-2 border-b border-slate-100">{cat.name}</div>{catFeats.map(f => (<div key={f.id} className="flex items-center justify-between py-2 px-1 hover:bg-slate-50 rounded-lg"><div><div className="text-sm font-medium">{f.name}</div><div className="text-xs text-slate-400">{f.type}</div></div><div className="flex gap-2"><button onClick={() => { setEditFeatId(f.id); setFeatForm(f) }} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏</button><button onClick={() => deleteFeat(f.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button></div></div>))}</div>)
+              return (
+                <div key={cat.id} className="mb-3">
+                  <div className="text-xs font-black text-slate-400 uppercase tracking-wider py-2 border-b border-slate-100">{cat.name}</div>
+                  {catFeats.map((f, idx) => (
+                    <div key={f.id} draggable onDragStart={() => onFeatDragStart(cat.id, idx)} onDragOver={e => onFeatDragOver(e, cat.id, idx)} onDragEnd={onFeatDragEnd}
+                      className="flex items-center gap-2 py-2 px-1 hover:bg-slate-50 rounded-lg cursor-grab active:cursor-grabbing">
+                      <div className="text-slate-300 text-base select-none">⠿</div>
+                      <div className="w-5 text-[10px] font-bold text-slate-300">{idx + 1}</div>
+                      <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate">{f.name}</div><div className="text-xs text-slate-400">{f.type}</div></div>
+                      <div className="flex gap-2"><button onClick={() => { setEditFeatId(f.id); setFeatForm({ name: f.name, category_id: f.category_id, type: f.type, sort_order: f.sort_order }) }} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100">✏</button><button onClick={() => deleteFeat(f.id)} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50">🗑</button></div>
+                    </div>
+                  ))}
+                </div>
+              )
             })}
           </div>
         </div>
@@ -900,7 +998,11 @@ function Configuracion({ features }: { features: any[] }) {
   )
 }
 
-export default function ComparadorClient({ models, categories, features, values }: any) {
+export default function ComparadorClient({ models, categories: rawCategories, features: rawFeatures, values }: any) {
+  // Red de seguridad: todos los módulos reciben categorías y características
+  // ordenadas por sort_order, sea cual sea el orden en que lleguen del servidor.
+  const categories = useMemo(() => [...(rawCategories || [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)), [rawCategories])
+  const features = useMemo(() => [...(rawFeatures || [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)), [rawFeatures])
   const [active, setActive] = useState('comparador')
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
