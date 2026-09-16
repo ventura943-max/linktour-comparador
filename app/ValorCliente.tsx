@@ -39,18 +39,24 @@ const EJERCICIO_VACIO: Ejercicio = {
 }
 
 // ============ INPUT NUMÉRICO ============
-// No controlado + key por valor: permite escribir "-", "1.5", etc. sin que React
-// reinicie el campo a mitad de escritura. Se confirma al salir del campo o con Enter.
+// Recalcula EN TIEMPO REAL: cada tecla propaga el valor (onCommit). Se mantiene un
+// texto local para que se pueda escribir "-" o "12." sin que el campo se reinicie.
+// Si el valor cambia desde fuera (cargar otro ejercicio), el texto se sincroniza.
 function NumInput({ value, onCommit, className, step = 50, placeholder = '0' }:
   { value: number; onCommit: (n: number) => void; className?: string; step?: number; placeholder?: string }) {
+  const [txt, setTxt] = useState(value === 0 ? '' : String(value))
+  useEffect(() => {
+    const n = parseFloat(txt); const cur = isNaN(n) ? 0 : n
+    if (cur !== value) setTxt(value === 0 ? '' : String(value))
+  }, [value])
   return (
     <input
-      key={value}
       type="number"
       step={step}
-      defaultValue={value === 0 ? '' : value}
+      value={txt}
       placeholder={placeholder}
-      onBlur={e => { const n = parseFloat(e.target.value); const nv = isNaN(n) ? 0 : n; if (nv !== value) onCommit(nv) }}
+      onChange={e => { setTxt(e.target.value); const n = parseFloat(e.target.value); onCommit(isNaN(n) ? 0 : n) }}
+      onBlur={() => { if (txt !== '' && (parseFloat(txt) === 0 || isNaN(parseFloat(txt)))) setTxt('') }}
       onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
       className={className}
     />
@@ -68,6 +74,7 @@ export default function ValorCliente({ models, categories, features, values, lan
   const [showRows, setShowRows] = useState(false)
   const [defaults, setDefaults] = useState<Record<string, number>>({})
   const [addCompOpen, setAddCompOpen] = useState(false)
+  const [lastSaved, setLastSaved] = useState<Date | null>(null)
 
   // ---------- Datos base ----------
   const segmentFeat = features.find((f: any) => f.name === SEGMENT_FEATURE_NAME)
@@ -231,9 +238,17 @@ export default function ValorCliente({ models, categories, features, values, lan
   }, [ej.feature_ids, ej.ajustes, compModels, features])
 
   // ---------- Ejercicios: guardar / nuevo / duplicar / eliminar ----------
-  async function guardar() {
-    if (!ej.nombre.trim()) { toast('Pon un nombre al ejercicio antes de guardar'); return }
-    if (!ej.reference_model_id) { toast('Selecciona un vehículo de referencia'); return }
+  // Guardado automático: 1,2 s después del último cambio, solo si el ejercicio ya existe
+  // (tiene id y nombre). El primer guardado de un ejercicio nuevo se hace con el botón.
+  useEffect(() => {
+    if (!dirty || !ej.id || !ej.nombre.trim() || saving) return
+    const t = setTimeout(() => { guardar(true) }, 1200)
+    return () => clearTimeout(t)
+  }, [ej, dirty])
+
+  async function guardar(auto = false) {
+    if (!ej.nombre.trim()) { if (!auto) toast('Pon un nombre al ejercicio antes de guardar'); return }
+    if (!ej.reference_model_id) { if (!auto) toast('Selecciona un vehículo de referencia'); return }
     setSaving(true)
     const row: any = {
       nombre: ej.nombre.trim(), tipo: ej.tipo.trim() || null,
@@ -251,8 +266,9 @@ export default function ValorCliente({ models, categories, features, values, lan
         setEj(prev => ({ ...prev, id: data.id }))
       }
       setDirty(false)
+      setLastSaved(new Date())
       await loadEjercicios(false)
-      toast('Ejercicio guardado ✓')
+      if (!auto) toast('Ejercicio guardado ✓')
     } catch (e: any) { toast('Error al guardar: ' + (e.message || '')) }
     setSaving(false)
   }
@@ -315,6 +331,12 @@ export default function ValorCliente({ models, categories, features, values, lan
 
   const listo = !!refModel && compModels.length > 0
 
+  // Bloques verticales por modelo: separador grueso al inicio de cada bloque,
+  // fondo alterno entre competidores y columna de referencia enmarcada en azul.
+  const edge = 'border-l-2 border-l-slate-400'
+  const grp = (i: number) => i % 2 === 1 ? 'bg-slate-50/70' : ''
+  const refCol = 'border-l-2 border-l-blue-300 border-r-2 border-r-blue-300 bg-blue-50/60'
+
   return (
     <div>
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
@@ -325,7 +347,20 @@ export default function ValorCliente({ models, categories, features, values, lan
           <h1 className="text-2xl font-black tracking-tight">Valor Cliente</h1>
           <p className="text-slate-500 text-sm">Cuánto costaría cada competidor si tuviera el equipamiento del vehículo de referencia</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="text-right leading-tight hidden md:block">
+            {saving ? <div className="text-xs font-bold text-slate-500">Guardando…</div>
+              : !ej.id ? <div className="text-xs font-bold text-amber-600">Ejercicio sin guardar</div>
+              : dirty ? <div className="text-xs font-bold text-amber-600">Cambios pendientes · se guardarán solos</div>
+              : lastSaved ? <div className="text-xs font-bold text-emerald-600">Guardado ✓ {lastSaved.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</div>
+              : <div className="text-xs font-bold text-emerald-600">Guardado ✓</div>}
+            {ej.id && <div className="text-[10px] text-slate-400">Guardado automático activado</div>}
+          </div>
+          <button onClick={() => guardar(false)} disabled={saving}
+            className={`flex items-center gap-2 px-5 py-2.5 text-white text-sm font-black rounded-xl transition shadow-md disabled:opacity-50 ${dirty || !ej.id ? 'bg-[#081224] hover:bg-[#162040] ring-2 ring-amber-300' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            {saving ? 'Guardando…' : 'Guardar ejercicio'}
+          </button>
           <button onClick={exportExcel} disabled={!listo} className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-full transition disabled:opacity-40">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>Excel
           </button>
@@ -367,13 +402,13 @@ export default function ValorCliente({ models, categories, features, values, lan
             <button onClick={nuevo} className={btnGhost}>Nuevo</button>
             <button onClick={duplicar} disabled={!ej.reference_model_id} className={`${btnGhost} disabled:opacity-40`}>Duplicar</button>
             {ej.id && <button onClick={eliminar} className={`${btn} border-red-100 bg-white text-red-500 hover:bg-red-50`}>Eliminar</button>}
-            <button onClick={guardar} disabled={saving} className={`${btnDark} relative`}>
+            <button onClick={() => guardar(false)} disabled={saving} className={`${btnGhost} relative`}>
               {saving ? 'Guardando…' : 'Guardar'}
               {dirty && !saving && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 border-2 border-white" title="Cambios sin guardar" />}
             </button>
           </div>
         </div>
-        {dirty && <p className="text-[11px] text-amber-600 mt-2">Hay cambios sin guardar.</p>}
+        {!ej.id && ej.reference_model_id && <p className="text-[11px] text-amber-600 mt-2">Ponle nombre y pulsa «Guardar ejercicio»: a partir de ahí los cambios se guardan automáticamente.</p>}
       </div>
 
       {/* CONFIGURACIÓN: SEGMENTO, REFERENCIA, COMPETIDORES */}
@@ -498,28 +533,29 @@ export default function ValorCliente({ models, categories, features, values, lan
             </div>
           </div>
 
-          <div className="overflow-auto max-h-[72vh]">
-            <table className="border-collapse text-xs" style={{ minWidth: `${290 + 120 + compModels.length * 230}px` }}>
+          <div className="overflow-x-auto">
+            <table className="border-collapse text-xs" style={{ tableLayout: 'fixed', width: '100%', minWidth: `${100 + 200 + 130 + compModels.length * 240}px` }}>
               <colgroup>
-                <col style={{ width: 90 }} /><col style={{ width: 200 }} /><col style={{ width: 120 }} />
-                {compModels.map((c: any) => <Fragment key={c.id}><col key={c.id + 'v'} style={{ width: 120 }} /><col key={c.id + 'a'} style={{ width: 110 }} /></Fragment>)}
+                {/* Cat. y Característica fijas; referencia y bloques de competidores se reparten el resto */}
+                <col style={{ width: 100 }} /><col style={{ width: 200 }} /><col />
+                {compModels.map((c: any) => <Fragment key={c.id}><col key={c.id + 'v'} /><col key={c.id + 'a'} /></Fragment>)}
               </colgroup>
-              <thead className="sticky top-0 z-20">
+              <thead>
                 <tr>
-                  <th colSpan={2} className="bg-[#081224] sticky left-0 z-30"></th>
-                  <th className="bg-blue-800 text-blue-100 text-center py-1.5 text-[8px] font-black tracking-widest uppercase border border-blue-900">{refModel.brand}</th>
-                  {compModels.map((c: any) => <th key={c.id} colSpan={2} className="bg-[#0d1e3a] text-[#7aa4cc] text-center py-1.5 text-[8px] font-black tracking-widest uppercase border border-[#1a2f4a]">{c.brand}</th>)}
+                  <th colSpan={2} className="bg-[#081224]"></th>
+                  <th className="bg-blue-800 text-blue-100 text-center py-1.5 text-[10px] font-black tracking-widest uppercase border-2 border-blue-300">{refModel.brand}</th>
+                  {compModels.map((c: any) => <th key={c.id} colSpan={2} className="bg-[#0d1e3a] text-[#7aa4cc] text-center py-1.5 text-[10px] font-black tracking-widest uppercase border border-[#1a2f4a] border-l-2 border-l-slate-400">{c.brand}</th>)}
                 </tr>
                 <tr>
-                  <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px] sticky left-0 z-30">Cat.</th>
-                  <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px] sticky left-[90px] z-30">Característica</th>
-                  <th className="bg-blue-700 text-white text-center px-1 py-2 font-black text-[9px] border border-blue-900">
-                    <div>{refModel.name} {refModel.version}</div><div className="text-[7px] text-blue-200 font-bold">referencia</div>
+                  <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[10px]">Cat.</th>
+                  <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[10px]">Característica</th>
+                  <th className="bg-blue-700 text-white text-center px-1 py-2 font-black text-[11px] border-2 border-blue-300 border-t-0">
+                    <div>{refModel.name} {refModel.version}</div><div className="text-[8px] text-blue-200 font-bold">referencia</div>
                   </th>
                   {compModels.map((c: any) => (
                     <Fragment key={c.id}>
-                      <th key={c.id + 'v'} className="bg-[#1c3050] text-white text-center px-1 py-2 font-black text-[9px] border border-[#1a2f4a]">{c.name} {c.version}</th>
-                      <th key={c.id + 'a'} className="bg-[#1c3050] text-[#a8c4e8] text-center px-1 py-2 font-black text-[8px] border border-[#1a2f4a]">
+                      <th key={c.id + 'v'} className="bg-[#1c3050] text-white text-center px-1 py-2 font-black text-[11px] border border-[#1a2f4a] border-l-2 border-l-slate-400">{c.name} {c.version}</th>
+                      <th key={c.id + 'a'} className="bg-[#1c3050] text-[#a8c4e8] text-center px-1 py-2 font-black text-[10px] border border-[#1a2f4a]">
                         Ajuste €
                         <button title="Sugerir ajustes desde los valores por defecto" onClick={() => { if (confirm(`¿Sustituir los ajustes de ${c.brand} ${c.name} por la sugerencia automática?`)) upd({ ajustes: { ...ej.ajustes, [c.id]: sugerirAjustes(c.id) } }) }}
                           className="ml-1 text-[8px] text-[#7aa4cc] hover:text-white">⟳</button>
@@ -531,28 +567,28 @@ export default function ValorCliente({ models, categories, features, values, lan
               <tbody>
                 {/* MSRP */}
                 <tr className="bg-slate-50">
-                  <td className="border border-slate-100 px-2 py-2 text-[9px] font-bold text-slate-500 sticky left-0 bg-slate-50 z-10">Precio</td>
-                  <td className="border border-slate-100 px-2 py-2 text-[10px] font-bold text-slate-700 sticky left-[90px] bg-slate-50 z-10">MSRP (€)</td>
-                  <td className="border border-slate-100 px-1 py-1 text-center bg-blue-50/60">
+                  <td className="border border-slate-100 px-2 py-2 text-[9px] font-bold text-slate-500">Precio</td>
+                  <td className="border border-slate-100 px-2 py-2 text-[10px] font-bold text-slate-700">MSRP (€)</td>
+                  <td className={`border border-slate-100 px-1 py-1 text-center ${refCol}`}>
                     <NumInput value={msrpOf(refModel)} step={10} onCommit={n => upd({ precios: { ...ej.precios, [refModel.id]: n } })} className="w-24 text-center font-black text-xs rounded-lg px-2 py-1 border border-blue-200 bg-white text-blue-900 outline-none focus:border-blue-400" />
                   </td>
-                  {compModels.map((c: any) => (
+                  {compModels.map((c: any, gi: number) => (
                     <Fragment key={c.id}>
-                      <td key={c.id + 'v'} className="border border-slate-100 px-1 py-1 text-center">
+                      <td key={c.id + 'v'} className={`border border-slate-100 px-1 py-1 text-center ${edge} ${grp(gi)}`}>
                         <NumInput value={msrpOf(c)} step={10} onCommit={n => upd({ precios: { ...ej.precios, [c.id]: n } })} className="w-24 text-center font-black text-xs rounded-lg px-2 py-1 border border-slate-200 bg-white text-slate-800 outline-none focus:border-blue-400" />
                       </td>
-                      <td key={c.id + 'a'} className="border border-slate-100"></td>
+                      <td key={c.id + 'a'} className={`border border-slate-100 ${grp(gi)}`}></td>
                     </Fragment>
                   ))}
                 </tr>
                 <tr className="bg-slate-50">
-                  <td className="border border-slate-100 sticky left-0 bg-slate-50 z-10"></td>
-                  <td className="border border-slate-100 px-2 py-1.5 text-[10px] text-slate-500 sticky left-[90px] bg-slate-50 z-10">Diferencia MSRP vs referencia</td>
-                  <td className="border border-slate-100 bg-blue-50/60"></td>
-                  {resumen.map((r: any) => (
+                  <td className="border border-slate-100"></td>
+                  <td className="border border-slate-100 px-2 py-1.5 text-[10px] text-slate-500">Diferencia MSRP vs referencia</td>
+                  <td className={`border border-slate-100 ${refCol}`}></td>
+                  {resumen.map((r: any, gi: number) => (
                     <Fragment key={r.model.id}>
-                      <td key={r.model.id + 'v'} className={`border border-slate-100 px-2 py-1.5 text-center font-bold ${signCls(r.difMsrp)}`}>{fmtEur(r.difMsrp, true)}</td>
-                      <td key={r.model.id + 'a'} className={`border border-slate-100 px-2 py-1.5 text-center font-bold ${signCls(r.difMsrp)}`}>{fmtPct(r.difMsrpPct)}</td>
+                      <td key={r.model.id + 'v'} className={`border border-slate-100 px-2 py-1.5 text-center font-bold ${edge} ${grp(gi)} ${signCls(r.difMsrp)}`}>{fmtEur(r.difMsrp, true)}</td>
+                      <td key={r.model.id + 'a'} className={`border border-slate-100 px-2 py-1.5 text-center font-bold ${grp(gi)} ${signCls(r.difMsrp)}`}>{fmtPct(r.difMsrpPct)}</td>
                     </Fragment>
                   ))}
                 </tr>
@@ -566,17 +602,17 @@ export default function ValorCliente({ models, categories, features, values, lan
                   const dim = allEqual && !anyAdj && !isAut
                   return (
                     <tr key={f.id} className={`${f.isFirst ? 'border-t-2 border-slate-300' : ''} ${dim ? 'opacity-45' : ''}`}>
-                      <td className="border border-slate-100 px-2 py-1.5 text-[9px] font-bold text-slate-500 bg-slate-50 sticky left-0 z-10 whitespace-nowrap overflow-hidden text-ellipsis">{f.isFirst ? f.catName : ''}</td>
-                      <td className="border border-slate-100 px-2 py-1.5 text-[10px] text-slate-700 sticky left-[90px] bg-white z-10 whitespace-nowrap overflow-hidden text-ellipsis" title={getName(f, lang)}>
+                      <td className="border border-slate-100 px-2 py-1.5 text-[11px] font-bold text-slate-500 bg-slate-50 whitespace-nowrap overflow-hidden text-ellipsis">{f.isFirst ? f.catName : ''}</td>
+                      <td className="border border-slate-100 px-2 py-1.5 text-[11px] text-slate-700 whitespace-nowrap overflow-hidden text-ellipsis" title={getName(f, lang)}>
                         {getName(f, lang)}{isAut && <span className="text-[8px] text-slate-400 ml-1">×{ej.precio_km} €/km</span>}
                       </td>
-                      <td className={`border border-slate-100 px-2 py-1.5 text-center bg-blue-50/60 ${valCls(refV)}`} title={refV}>{displayVal(refV)}</td>
-                      {compModels.map((c: any) => {
+                      <td className={`border border-slate-100 px-2 py-1.5 text-center ${refCol} ${valCls(refV)}`} title={refV}>{displayVal(refV)}</td>
+                      {compModels.map((c: any, gi: number) => {
                         const v = getVal(f.id, c.id); const a = ajusteDe(c.id, f)
                         return (
                           <Fragment key={c.id}>
-                            <td key={c.id + 'v'} className={`border border-slate-100 px-2 py-1.5 text-center ${valCls(v)}`} title={v}>{displayVal(v)}</td>
-                            <td key={c.id + 'a'} className="border border-slate-100 px-1 py-1 text-center">
+                            <td key={c.id + 'v'} className={`border border-slate-100 px-2 py-1.5 text-center ${edge} ${grp(gi)} ${valCls(v)}`} title={v}>{displayVal(v)}</td>
+                            <td key={c.id + 'a'} className={`border border-slate-100 px-1 py-1 text-center ${grp(gi)}`}>
                               {isAut ? (
                                 <span className={`inline-block w-24 text-right font-bold text-xs rounded-lg px-2 py-1 border ${ajCls(a)}`} title={`(${parseFloat(refV) || 0} − ${parseFloat(v) || 0}) × ${ej.precio_km}`}>{a !== 0 ? fmtEur(a, true) : '—'}</span>
                               ) : (
@@ -592,34 +628,34 @@ export default function ValorCliente({ models, categories, features, values, lan
 
                 {/* RESULTADO */}
                 <tr className="bg-amber-50 border-t-2 border-amber-200">
-                  <td className="border border-amber-100 px-2 py-2 text-[9px] font-black text-amber-700 uppercase sticky left-0 bg-amber-50 z-10">Resultado</td>
-                  <td className="border border-amber-100 px-2 py-2 text-[10px] font-bold text-slate-700 sticky left-[90px] bg-amber-50 z-10">Total ajustes equipamiento</td>
-                  <td className="border border-amber-100 bg-blue-50/60"></td>
+                  <td className="border border-amber-100 px-2 py-2 text-[9px] font-black text-amber-700 uppercase">Resultado</td>
+                  <td className="border border-amber-100 px-2 py-2 text-[10px] font-bold text-slate-700">Total ajustes equipamiento</td>
+                  <td className={`border border-amber-100 ${refCol}`}></td>
                   {resumen.map((r: any) => (
                     <Fragment key={r.model.id}>
-                      <td key={r.model.id + 'v'} className="border border-amber-100"></td>
+                      <td key={r.model.id + 'v'} className={`border border-amber-100 ${edge}`}></td>
                       <td key={r.model.id + 'a'} className={`border border-amber-100 px-2 py-2 text-right font-black ${signCls(r.total)}`}>{fmtEur(r.total, true)}</td>
                     </Fragment>
                   ))}
                 </tr>
                 <tr className="bg-amber-50">
-                  <td className="border border-amber-100 sticky left-0 bg-amber-50 z-10"></td>
-                  <td className="border border-amber-100 px-2 py-2 text-[10px] font-bold text-slate-700 sticky left-[90px] bg-amber-50 z-10">Precio ajustado (€)</td>
-                  <td className="border border-amber-100 px-2 py-2 text-center font-black text-blue-900 bg-blue-50/60">{fmtEur(msrpOf(refModel))}</td>
+                  <td className="border border-amber-100"></td>
+                  <td className="border border-amber-100 px-2 py-2 text-[10px] font-bold text-slate-700">Precio ajustado (€)</td>
+                  <td className={`border border-amber-100 px-2 py-2 text-center font-black text-blue-900 ${refCol}`}>{fmtEur(msrpOf(refModel))}</td>
                   {resumen.map((r: any) => (
                     <Fragment key={r.model.id}>
-                      <td key={r.model.id + 'v'} className="border border-amber-100 px-2 py-2 text-center font-black text-sm text-slate-900">{fmtEur(r.precioAjustado)}</td>
+                      <td key={r.model.id + 'v'} className={`border border-amber-100 px-2 py-2 text-center font-black text-sm text-slate-900 ${edge}`}>{fmtEur(r.precioAjustado)}</td>
                       <td key={r.model.id + 'a'} className="border border-amber-100"></td>
                     </Fragment>
                   ))}
                 </tr>
                 <tr className="bg-amber-50">
-                  <td className="border border-amber-100 sticky left-0 bg-amber-50 z-10"></td>
-                  <td className="border border-amber-100 px-2 py-2 text-[10px] font-bold text-slate-700 sticky left-[90px] bg-amber-50 z-10">Diferencia ajustada vs referencia</td>
-                  <td className="border border-amber-100 bg-blue-50/60"></td>
+                  <td className="border border-amber-100"></td>
+                  <td className="border border-amber-100 px-2 py-2 text-[10px] font-bold text-slate-700">Diferencia ajustada vs referencia</td>
+                  <td className={`border border-amber-100 ${refCol}`}></td>
                   {resumen.map((r: any) => (
                     <Fragment key={r.model.id}>
-                      <td key={r.model.id + 'v'} className={`border border-amber-100 px-2 py-2 text-center font-black ${signCls(r.difAjustada)}`}>{fmtEur(r.difAjustada, true)}</td>
+                      <td key={r.model.id + 'v'} className={`border border-amber-100 px-2 py-2 text-center font-black ${edge} ${signCls(r.difAjustada)}`}>{fmtEur(r.difAjustada, true)}</td>
                       <td key={r.model.id + 'a'} className={`border border-amber-100 px-2 py-2 text-center font-black ${signCls(r.difAjustada)}`}>{fmtPct(r.difAjustadaPct)}</td>
                     </Fragment>
                   ))}
