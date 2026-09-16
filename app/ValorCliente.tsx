@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useMemo, Fragment } from 'react'
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Lang } from '@/lib/i18n'
 import {
@@ -75,6 +75,9 @@ export default function ValorCliente({ models, categories, features, values, lan
   const [defaults, setDefaults] = useState<Record<string, number>>({})
   const [addCompOpen, setAddCompOpen] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  // Cabeceras fijas: la 2ª fila se pega justo debajo de la 1ª, midiendo su altura real
+  const headRow1 = useRef<HTMLTableRowElement>(null)
+  const [headH, setHeadH] = useState(28)
 
   // ---------- Datos base ----------
   const segmentFeat = features.find((f: any) => f.name === SEGMENT_FEATURE_NAME)
@@ -156,6 +159,23 @@ export default function ValorCliente({ models, categories, features, values, lan
     if (valor === 0) delete comp[featId]; else comp[featId] = valor
     upd({ ajustes: { ...ej.ajustes, [compId]: comp } })
   }
+
+  // Reseteo de ajustes manuales del EJERCICIO EN CURSO (no toca otros ejercicios guardados).
+  // La autonomía no se resetea: es un cálculo, no un valor introducido.
+  function resetAjustes(compId?: string) {
+    const comp = compId ? compModels.find((c: any) => c.id === compId) : null
+    const msg = comp
+      ? `¿Poner a 0 todos los ajustes de ${`${comp.brand} ${comp.name} ${comp.version || ''}`.trim()} en este ejercicio?`
+      : `¿Poner a 0 TODOS los ajustes manuales de este ejercicio (${compModels.length} competidores)?\nLos MSRP y la autonomía no se tocan.`
+    if (!confirm(msg)) return
+    if (compId) upd({ ajustes: { ...ej.ajustes, [compId]: {} } })
+    else upd({ ajustes: {} })
+  }
+  const nAjustesManuales = useMemo(() =>
+    compModels.reduce((n: number, c: any) => n + Object.values(ej.ajustes[c.id] || {}).filter(v => v !== 0).length, 0)
+  , [ej.ajustes, compModels])
+
+  useEffect(() => { if (headRow1.current) setHeadH(headRow1.current.offsetHeight) }, [compModels.length, refModel?.id])
 
   const resumen = useMemo(() => {
     if (!refModel) return []
@@ -520,8 +540,8 @@ export default function ValorCliente({ models, categories, features, values, lan
 
       {/* TABLA */}
       {listo ? (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden mb-4">
-          <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-md mb-4">
+          <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2 rounded-t-2xl">
             <div className="flex items-center gap-3 text-xs">
               <span className="font-black text-slate-500 uppercase tracking-wider">Ficha de equipamiento</span>
               <span className="text-slate-400">{filas.length} filas</span>
@@ -529,11 +549,16 @@ export default function ValorCliente({ models, categories, features, values, lan
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-slate-400 hidden md:inline">Ajuste <span className="text-emerald-600 font-bold">+</span> la referencia tiene algo que el competidor no · <span className="text-red-600 font-bold">−</span> el competidor tiene algo que la referencia no</span>
+              <button onClick={() => resetAjustes()} disabled={nAjustesManuales === 0} title="Poner a 0 todos los ajustes manuales de este ejercicio"
+                className={`${btn} border-red-100 bg-white text-red-500 hover:bg-red-50 disabled:opacity-40`}>
+                ↺ Resetear ajustes{nAjustesManuales > 0 && <span className="ml-1 text-red-300">({nAjustesManuales})</span>}
+              </button>
               <button onClick={() => setShowRows(true)} className={btnGhost}>Filas visibles</button>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Sin overflow en los contenedores: así las cabeceras pueden fijarse al hacer scroll de página */}
+          <div>
             <table className="border-collapse text-xs" style={{ tableLayout: 'fixed', width: '100%', minWidth: `${100 + 200 + 130 + compModels.length * 240}px` }}>
               <colgroup>
                 {/* Cat. y Característica fijas; referencia y bloques de competidores se reparten el resto */}
@@ -541,24 +566,26 @@ export default function ValorCliente({ models, categories, features, values, lan
                 {compModels.map((c: any) => <Fragment key={c.id}><col key={c.id + 'v'} /><col key={c.id + 'a'} /></Fragment>)}
               </colgroup>
               <thead>
-                <tr>
-                  <th colSpan={2} className="bg-[#081224]"></th>
-                  <th className="bg-blue-800 text-blue-100 text-center py-1.5 text-[10px] font-black tracking-widest uppercase border-2 border-blue-300">{refModel.brand}</th>
-                  {compModels.map((c: any) => <th key={c.id} colSpan={2} className="bg-[#0d1e3a] text-[#7aa4cc] text-center py-1.5 text-[10px] font-black tracking-widest uppercase border border-[#1a2f4a] border-l-2 border-l-slate-400">{c.brand}</th>)}
+                <tr ref={headRow1}>
+                  <th colSpan={2} className="bg-[#081224] sticky top-0 z-30"></th>
+                  <th className="bg-blue-800 text-blue-100 text-center py-1.5 text-[10px] font-black tracking-widest uppercase border-2 border-blue-300 sticky top-0 z-30">{refModel.brand}</th>
+                  {compModels.map((c: any) => <th key={c.id} colSpan={2} className="bg-[#0d1e3a] text-[#7aa4cc] text-center py-1.5 text-[10px] font-black tracking-widest uppercase border border-[#1a2f4a] border-l-2 border-l-slate-400 sticky top-0 z-30">{c.brand}</th>)}
                 </tr>
                 <tr>
-                  <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[10px]">Cat.</th>
-                  <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[10px]">Característica</th>
-                  <th className="bg-blue-700 text-white text-center px-1 py-2 font-black text-[11px] border-2 border-blue-300 border-t-0">
+                  <th style={{ top: headH }} className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[10px] sticky z-30">Cat.</th>
+                  <th style={{ top: headH }} className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[10px] sticky z-30">Característica</th>
+                  <th style={{ top: headH }} className="bg-blue-700 text-white text-center px-1 py-2 font-black text-[11px] border-2 border-blue-300 border-t-0 sticky z-30">
                     <div>{refModel.name} {refModel.version}</div><div className="text-[8px] text-blue-200 font-bold">referencia</div>
                   </th>
                   {compModels.map((c: any) => (
                     <Fragment key={c.id}>
-                      <th key={c.id + 'v'} className="bg-[#1c3050] text-white text-center px-1 py-2 font-black text-[11px] border border-[#1a2f4a] border-l-2 border-l-slate-400">{c.name} {c.version}</th>
-                      <th key={c.id + 'a'} className="bg-[#1c3050] text-[#a8c4e8] text-center px-1 py-2 font-black text-[10px] border border-[#1a2f4a]">
+                      <th key={c.id + 'v'} style={{ top: headH }} className="bg-[#1c3050] text-white text-center px-1 py-2 font-black text-[11px] border border-[#1a2f4a] border-l-2 border-l-slate-400 sticky z-30">{c.name} {c.version}</th>
+                      <th key={c.id + 'a'} style={{ top: headH }} className="bg-[#1c3050] text-[#a8c4e8] text-center px-1 py-2 font-black text-[10px] border border-[#1a2f4a] sticky z-30">
                         Ajuste €
                         <button title="Sugerir ajustes desde los valores por defecto" onClick={() => { if (confirm(`¿Sustituir los ajustes de ${c.brand} ${c.name} por la sugerencia automática?`)) upd({ ajustes: { ...ej.ajustes, [c.id]: sugerirAjustes(c.id) } }) }}
-                          className="ml-1 text-[8px] text-[#7aa4cc] hover:text-white">⟳</button>
+                          className="ml-1 text-[9px] text-[#7aa4cc] hover:text-white">⟳</button>
+                        <button title="Poner a 0 los ajustes de este modelo (solo en este ejercicio)" onClick={() => resetAjustes(c.id)}
+                          className="ml-1 text-[9px] text-[#7aa4cc] hover:text-red-300">↺</button>
                       </th>
                     </Fragment>
                   ))}
