@@ -125,6 +125,88 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   const [activeCat, setActiveCat] = useState('all')
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>(models.slice(0, 3).map((m: any) => m.id))
+
+  // ---------- Vistas guardadas + filas visibles ----------
+  // Una vista = modelos seleccionados (y su orden) + características ocultas.
+  // Se guardan en la tabla settings (id 'comparador_vistas'), compartidas entre equipos.
+  // Se guardan las OCULTAS (no las visibles) para que cualquier característica nueva aparezca por defecto.
+  type Vista = { id: string; nombre: string; model_ids: string[]; hidden_feature_ids: string[]; es_default: boolean }
+  const [vistas, setVistas] = useState<Vista[]>([])
+  const [vistaId, setVistaId] = useState<string>('')
+  const [hiddenIds, setHiddenIds] = useState<string[]>([])
+  const [showRows, setShowRows] = useState(false)
+  const [savingVista, setSavingVista] = useState(false)
+  const [vmsg, setVmsg] = useState('')
+  function vtoast(m: string) { setVmsg(m); setTimeout(() => setVmsg(''), 3000) }
+
+  useEffect(() => {
+    supabase.from('settings').select('*').eq('id', 'comparador_vistas').single().then(({ data }) => {
+      const list: Vista[] = (data?.value || []) as Vista[]
+      setVistas(list)
+      const def = list.find(v => v.es_default)
+      if (def) aplicarVista(def)   // la vista por defecto se carga al entrar
+    })
+  }, [])
+
+  function aplicarVista(v: Vista) {
+    const ids = (v.model_ids || []).filter(id => models.some((m: any) => m.id === id))
+    if (ids.length > 0) setSelectedIds(ids)
+    setHiddenIds(v.hidden_feature_ids || [])
+    setVistaId(v.id)
+  }
+  async function persistVistas(list: Vista[]) {
+    setVistas(list)
+    const { error } = await supabase.from('settings').upsert({ id: 'comparador_vistas', value: list })
+    if (error) vtoast('Error guardando la vista: ' + error.message)
+    return !error
+  }
+  async function guardarVista(comoNueva = false) {
+    const actual = vistas.find(v => v.id === vistaId)
+    const editando = !!actual && !comoNueva
+    const nombre = editando ? actual!.nombre : (prompt('Nombre de la vista:', actual ? `${actual.nombre} (copia)` : '') || '').trim()
+    if (!nombre) return
+    setSavingVista(true)
+    const nueva: Vista = {
+      id: editando ? actual!.id : crypto.randomUUID(),
+      nombre,
+      model_ids: selectedIds,
+      hidden_feature_ids: hiddenIds,
+      es_default: editando ? actual!.es_default : vistas.length === 0, // la primera vista creada es la de defecto
+    }
+    const list = editando ? vistas.map(v => v.id === nueva.id ? nueva : v) : [...vistas, nueva]
+    const ok = await persistVistas(list)
+    if (ok) { setVistaId(nueva.id); vtoast('Vista guardada ✓') }
+    setSavingVista(false)
+  }
+  async function marcarDefault(id: string) {
+    if (await persistVistas(vistas.map(v => ({ ...v, es_default: v.id === id })))) vtoast('Vista por defecto actualizada ✓')
+  }
+  async function eliminarVista() {
+    const v = vistas.find(x => x.id === vistaId)
+    if (!v || !confirm(`¿Eliminar la vista "${v.nombre}"?`)) return
+    if (await persistVistas(vistas.filter(x => x.id !== vistaId))) { setVistaId(''); vtoast('Vista eliminada') }
+  }
+  const vistaActual = vistas.find(v => v.id === vistaId)
+  const vistaDirty = !!vistaActual && (
+    JSON.stringify(vistaActual.model_ids) !== JSON.stringify(selectedIds) ||
+    JSON.stringify([...(vistaActual.hidden_feature_ids || [])].sort()) !== JSON.stringify([...hiddenIds].sort())
+  )
+
+  const isHidden = (f: any) => hiddenIds.includes(f.id)
+  function toggleFeatureVisible(fid: string) {
+    setHiddenIds(hiddenIds.includes(fid) ? hiddenIds.filter(x => x !== fid) : [...hiddenIds, fid])
+  }
+  function toggleCategoriaVisible(catId: string, visible: boolean) {
+    const ids = features.filter((f: any) => f.category_id === catId).map((f: any) => f.id)
+    setHiddenIds(visible ? hiddenIds.filter(x => !ids.includes(x)) : Array.from(new Set([...hiddenIds, ...ids])))
+  }
+  function presetVisible(kind: 'todas' | 'ninguna' | 'conDatos') {
+    if (kind === 'todas') return setHiddenIds([])
+    if (kind === 'ninguna') return setHiddenIds(features.map((f: any) => f.id))
+    // Solo con datos: ocultar las características sin ningún valor en los modelos seleccionados
+    setHiddenIds(features.filter((f: any) => !selectedModels.some((m: any) => { const v = val(f.id, m.id); return v && v !== '—' && String(v).trim() !== '' })).map((f: any) => f.id))
+  }
+  const catFullyHidden = (catId: string) => { const fs = features.filter((f: any) => f.category_id === catId); return fs.length > 0 && fs.every(isHidden) }
   const [showPicker, setShowPicker] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
   const [sources, setSources] = useState<any[]>([])
@@ -195,6 +277,7 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   const filteredFeatures = categories.flatMap((cat: any) => {
     const feats = features.filter((f: any) => {
       if (f.category_id !== cat.id) return false
+      if (isHidden(f)) return false
       if (activeCat !== 'all' && cat.id !== activeCat) return false
       const fname = getName(f, lang).toLowerCase()
       const cname = getName(cat, lang).toLowerCase()
@@ -287,7 +370,28 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   return (
     <div>
       <h1 className="text-2xl md:text-3xl font-black tracking-tight mb-1">{t.comparadorTitle}</h1>
-      <p className="text-slate-500 text-sm mb-6">{t.comparadorSubtitle}</p>
+      <p className="text-slate-500 text-sm mb-4">{t.comparadorSubtitle}</p>
+      {vmsg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{vmsg}</div>}
+
+      {/* VISTAS GUARDADAS */}
+      <div className="flex flex-wrap items-center gap-2 mb-5 bg-white border border-slate-200 rounded-2xl px-3 py-2 shadow-sm">
+        <span className="text-xs font-bold text-slate-500 ml-1">Vista</span>
+        <select value={vistaId}
+          onChange={e => { const v = vistas.find(x => x.id === e.target.value); if (v) aplicarVista(v); else setVistaId('') }}
+          className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-blue-400 min-w-[200px] bg-white">
+          <option value="">Selección manual (sin vista)</option>
+          {vistas.map(v => <option key={v.id} value={v.id}>{v.es_default ? '★ ' : ''}{v.nombre}</option>)}
+        </select>
+        <button onClick={() => guardarVista(false)} disabled={savingVista}
+          className="px-3 py-1.5 text-xs font-bold rounded-lg bg-[#081224] text-white hover:bg-[#162040] disabled:opacity-50 whitespace-nowrap">
+          {vistaActual ? 'Guardar cambios' : 'Guardar como vista'}
+        </button>
+        {vistaActual && <button onClick={() => guardarVista(true)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 whitespace-nowrap">Guardar como nueva</button>}
+        {vistaActual && !vistaActual.es_default && <button onClick={() => marcarDefault(vistaActual.id)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 whitespace-nowrap">★ Hacer por defecto</button>}
+        {vistaActual && <button onClick={eliminarVista} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-100 bg-white text-red-500 hover:bg-red-50">Eliminar</button>}
+        {vistaDirty && <span className="text-[11px] text-amber-600 font-bold">Cambios sin guardar en esta vista</span>}
+        <span className="text-[11px] text-slate-400 ml-auto hidden lg:inline">La vista ★ se carga al entrar. Guarda modelos, orden y filas visibles.</span>
+      </div>
       <div className="overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 mb-8">
         <div className="flex gap-3 items-stretch" style={{ minWidth: 'max-content' }}>
           {selectedModels.map((m: any, idx: number) => (
@@ -350,7 +454,12 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
         <div className="flex items-center gap-2">
           <input type="text" placeholder={t.buscar} value={search} onChange={e => setSearch(e.target.value)}
             className="border border-slate-200 rounded-full px-3 py-2 text-sm outline-none focus:border-blue-400 flex-1 md:min-w-[200px]" />
-          <span className="text-xs text-slate-400 whitespace-nowrap">{filteredFeatures.length} {t.espec}</span>
+          <span className="text-xs text-slate-400 whitespace-nowrap">{filteredFeatures.length} {t.espec}{hiddenIds.length > 0 && <span className="text-amber-600"> · {hiddenIds.length} ocultas</span>}</span>
+          <button onClick={() => setShowRows(true)} title="Elegir qué categorías y características se muestran"
+            className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:border-slate-400 text-slate-700 text-xs font-bold rounded-full transition whitespace-nowrap">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 6h16M4 12h10M4 18h6"/></svg>
+            Filas visibles
+          </button>
           <button onClick={exportComparador} title="Descargar Excel"
             className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-full transition whitespace-nowrap">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
@@ -364,7 +473,7 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
         </div>
       </div>
       <div className="flex gap-2 flex-wrap mb-4">
-        {[{ id: 'all', name: t.todo }, ...categories.map((c: any) => ({ ...c, name: getName(c, lang) }))].map((c: any) => (
+        {[{ id: 'all', name: t.todo }, ...categories.filter((c: any) => !catFullyHidden(c.id)).map((c: any) => ({ ...c, name: getName(c, lang) }))].map((c: any) => (
           <button key={c.id} onClick={() => setActiveCat(c.id)}
             className={`px-3 py-1.5 rounded-full text-xs font-bold border transition whitespace-nowrap ${activeCat === c.id ? 'bg-[#081224] text-white border-[#081224]' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
             {c.name}
@@ -372,42 +481,93 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
         ))}
       </div>
       <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-x-auto">
-        <table className="border-collapse text-xs" style={{ tableLayout: 'fixed', width: `${180 + selectedModels.length * 90}px`, minWidth: '100%' }}>
+        {/* Categoría y Característica tienen ancho FIJO; las columnas de modelos (sin ancho)
+            se reparten el espacio sobrante. Así en pantallas grandes crecen los datos, no las etiquetas. */}
+        <table className="border-collapse" style={{ tableLayout: 'fixed', width: '100%', minWidth: `${330 + selectedModels.length * 130}px` }}>
           <colgroup>
-            <col style={{ width: '70px' }} /><col style={{ width: '110px' }} />
-            {selectedModels.map((m: any) => <col key={m.id} style={{ width: '90px' }} />)}
+            <col style={{ width: '100px' }} /><col style={{ width: '230px' }} />
+            {selectedModels.map((m: any) => <col key={m.id} />)}
           </colgroup>
           <thead>
             <tr>
               <th colSpan={2} className="bg-[#081224]"></th>
-              {selectedModels.map((m: any) => <th key={m.id} className="bg-[#0d1e3a] text-[#7aa4cc] text-center py-1.5 text-[8px] font-black tracking-widest uppercase border border-[#1a2f4a]">{m.brand}</th>)}
+              {selectedModels.map((m: any) => <th key={m.id} className="bg-[#0d1e3a] text-[#7aa4cc] text-center py-1.5 text-[9px] font-black tracking-widest uppercase border border-[#1a2f4a]">{m.brand}</th>)}
             </tr>
             <tr>
               <th colSpan={2} className="bg-[#081224]"></th>
-              {selectedModels.map((m: any) => <th key={m.id} className="bg-[#14243a] text-[#a8c4e8] text-center py-1.5 text-[8px] font-black tracking-wider uppercase border border-[#1a2f4a]">{m.name}</th>)}
+              {selectedModels.map((m: any) => <th key={m.id} className="bg-[#14243a] text-[#a8c4e8] text-center py-1.5 text-[9px] font-black tracking-wider uppercase border border-[#1a2f4a]">{m.name}</th>)}
             </tr>
             <tr>
-              <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px]">{t.cat}</th>
-              <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[8px]">{t.caracteristica}</th>
-              {selectedModels.map((m: any) => <th key={m.id} className="bg-[#1c3050] text-white text-center px-1 py-2 font-black text-[8px] border border-[#1a2f4a]">{m.version || m.name}</th>)}
+              <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[9px]">{t.cat}</th>
+              <th className="bg-[#081224] text-white text-left px-2 py-2 font-black uppercase text-[9px]">{t.caracteristica}</th>
+              {selectedModels.map((m: any) => <th key={m.id} className="bg-[#1c3050] text-white text-center px-1 py-2 font-black text-[10px] border border-[#1a2f4a]">{m.version || m.name}</th>)}
             </tr>
           </thead>
           <tbody>
             {filteredFeatures.map((feat: any) => (
               <tr key={feat.id} className={feat.isFirst ? 'border-t-2 border-slate-300' : ''}>
-                <td className="border border-slate-100 px-1 py-1.5 text-[9px] font-bold text-slate-500 bg-slate-50 overflow-hidden text-ellipsis whitespace-nowrap">{feat.isFirst ? feat.catName : ''}</td>
-                <td className="border border-slate-100 px-1 py-1.5 text-[9px] text-slate-700 overflow-hidden text-ellipsis whitespace-nowrap" title={getName(feat, lang)}>{getName(feat, lang)}</td>
+                <td className="border border-slate-100 px-2 py-2 text-[11px] font-bold text-slate-500 bg-slate-50 overflow-hidden text-ellipsis whitespace-nowrap" title={feat.isFirst ? feat.catName : ''}>{feat.isFirst ? feat.catName : ''}</td>
+                <td className="border border-slate-100 px-2 py-2 text-[11px] text-slate-700 overflow-hidden text-ellipsis whitespace-nowrap" title={getName(feat, lang)}>{getName(feat, lang)}</td>
                 {selectedModels.map((m: any) => {
                   const v = val(feat.id, m.id); const lo = v.toLowerCase().trim()
                   const cls = lo === 'yes' ? 'text-emerald-700 bg-emerald-50 font-black' : lo === 'no' ? 'text-red-600 bg-red-50 font-black' : lo === 'n/a' ? 'text-slate-400' : ''
                   const display = lo === 'yes' ? '✓' : lo === 'no' ? '✗' : v
-                  return <td key={m.id} className={`border border-slate-100 px-1 py-1.5 text-center text-[9px] overflow-hidden text-ellipsis whitespace-nowrap ${cls}`} title={v}>{display}</td>
+                  return <td key={m.id} className={`border border-slate-100 px-2 py-2 text-center text-[11px] overflow-hidden text-ellipsis whitespace-nowrap ${cls}`} title={v}>{display}</td>
                 })}
               </tr>
             ))}
+            {filteredFeatures.length === 0 && (
+              <tr><td colSpan={2 + selectedModels.length} className="text-center text-slate-400 text-sm py-10">No hay características visibles con los filtros actuales. Revisa "Filas visibles" o el buscador.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
+
+      {/* MODAL FILAS VISIBLES */}
+      {showRows && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowRows(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div>
+                <div className="font-black text-base">Filas visibles en la ficha completa</div>
+                <div className="text-xs text-slate-400">Desmarca lo que no quieras ver. Afecta a la tabla, al Excel y al PDF. Guarda una vista para recordarlo.</div>
+              </div>
+              <button onClick={() => setShowRows(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            </div>
+            <div className="px-6 py-3 border-b border-slate-100 flex gap-2 flex-wrap">
+              <button onClick={() => presetVisible('todas')} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">Todas</button>
+              <button onClick={() => presetVisible('ninguna')} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">Ninguna</button>
+              <button onClick={() => presetVisible('conDatos')} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">Solo con datos en los modelos seleccionados</button>
+            </div>
+            <div className="overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
+              {categories.map((cat: any) => {
+                const fs = features.filter((f: any) => f.category_id === cat.id); if (!fs.length) return null
+                const nOn = fs.filter((f: any) => !isHidden(f)).length
+                return (
+                  <div key={cat.id}>
+                    <label className="flex items-center justify-between border-b border-slate-100 pb-1 mb-2 cursor-pointer">
+                      <span className="flex items-center gap-2 text-xs font-black text-slate-600 uppercase tracking-wider">
+                        <input type="checkbox" checked={nOn === fs.length} ref={el => { if (el) el.indeterminate = nOn > 0 && nOn < fs.length }} onChange={e => toggleCategoriaVisible(cat.id, e.target.checked)} />
+                        {getName(cat, lang)} <span className="text-slate-300 font-normal">{nOn}/{fs.length}</span>
+                      </span>
+                    </label>
+                    {fs.map((f: any) => (
+                      <label key={f.id} className="flex items-center gap-2 py-1 text-sm text-slate-700 cursor-pointer hover:bg-slate-50 rounded px-1">
+                        <input type="checkbox" checked={!isHidden(f)} onChange={() => toggleFeatureVisible(f.id)} />
+                        <span className="truncate">{getName(f, lang)}</span>
+                      </label>
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
+            <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-xs text-slate-400">{features.length - hiddenIds.length} de {features.length} visibles</span>
+              <button onClick={() => setShowRows(false)} className="px-4 py-2 text-xs font-bold rounded-lg bg-[#081224] text-white hover:bg-[#162040]">Listo</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* BLOQUE DE FUENTES */}
       {selectedModels.some((m: any) => sourcesFor(m.id).length > 0) && (
