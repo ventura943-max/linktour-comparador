@@ -27,16 +27,26 @@ type Ejercicio = {
   reference_model_id: string
   competitor_ids: string[]
   feature_ids: string[] | null                 // null = todas las características
-  precio_km: number
   precios: Record<string, number>              // MSRP editado por model_id
-  ajustes: Record<string, Record<string, number>> // competitor_id -> feature_id -> €
+  ajustes: Record<string, Record<string, number>> // SOLO correcciones manuales: competitor_id -> feature_id -> €
   notas: string
 }
 
+// Catálogo de valores cliente: cuánto vale cada característica y con qué regla se aplica.
+// Se guarda en valor_cliente_items y es común a todos los ejercicios.
+type Regla = 'fijo' | 'unidad' | 'texto'
+type ItemCatalogo = { valor: number; regla: Regla; direccion: 'mayor' | 'menor'; preferido: string }
+type Catalogo = Record<string, ItemCatalogo>   // feature_id -> item
+
 const EJERCICIO_VACIO: Ejercicio = {
   nombre: '', tipo: '', reference_model_id: '', competitor_ids: [], feature_ids: null,
-  precio_km: 16, precios: {}, ajustes: {}, notas: '',
+  precios: {}, ajustes: {}, notas: '',
 }
+
+const parseNum = (v: string) => parseFloat(String(v).replace(',', '.').trim())
+const isBoolVal = (v: string) => ['yes', 'no', 'sí', 'si'].includes(v.toLowerCase().trim())
+const isYesVal = (v: string) => ['yes', 'sí', 'si'].includes(v.toLowerCase().trim())
+const isNumVal = (v: string) => v.trim() !== '' && !isNaN(parseNum(v))
 
 // ============ INPUT NUMÉRICO ============
 // Recalcula EN TIEMPO REAL: cada tecla propaga el valor (onCommit). Se mantiene un
@@ -58,6 +68,7 @@ function NumInput({ value, onCommit, className, step = 50, placeholder = '0' }:
       onChange={e => { setTxt(e.target.value); const n = parseFloat(e.target.value); onCommit(isNaN(n) ? 0 : n) }}
       onBlur={() => { if (txt !== '' && (parseFloat(txt) === 0 || isNaN(parseFloat(txt)))) setTxt('') }}
       onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+      onWheel={e => (e.target as HTMLInputElement).blur()}  // la rueda del ratón no cambia el valor
       className={className}
     />
   )
@@ -72,7 +83,10 @@ export default function ValorCliente({ models, categories, features, values, lan
   const [msg, setMsg] = useState('')
   const [segment, setSegment] = useState('')
   const [showRows, setShowRows] = useState(false)
-  const [defaults, setDefaults] = useState<Record<string, number>>({})
+  const [catalogo, setCatalogo] = useState<Catalogo>({})
+  const [catOpen, setCatOpen] = useState(false)
+  const [catDraft, setCatDraft] = useState<Catalogo>({})
+  const [catSaving, setCatSaving] = useState(false)
   const [addCompOpen, setAddCompOpen] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   // Cabeceras fijas: la 2ª fila se pega justo debajo de la 1ª, midiendo su altura real
@@ -99,7 +113,7 @@ export default function ValorCliente({ models, categories, features, values, lan
   const disponibles = modelsInSegment.filter((m: any) => m.id !== ej.reference_model_id && !ej.competitor_ids.includes(m.id))
 
   // ---------- Carga inicial ----------
-  useEffect(() => { loadEjercicios(true); loadDefaults() }, [])
+  useEffect(() => { loadEjercicios(true); loadCatalogo() }, [])
 
   // Aviso al cerrar/recargar con cambios sin guardar
   useEffect(() => {
@@ -114,17 +128,36 @@ export default function ValorCliente({ models, categories, features, values, lan
     // Por defecto se abre el último ejercicio guardado
     if (selectLatest && data && data.length > 0) cargar(data[0])
   }
-  async function loadDefaults() {
+  async function loadCatalogo() {
     const { data } = await supabase.from('valor_cliente_items').select('*')
-    const map: Record<string, number> = {}
-    ;(data || []).forEach((d: any) => { if (d.valor_default) map[d.feature_id] = d.valor_default })
-    setDefaults(map)
+    const map: Catalogo = {}
+    ;(data || []).forEach((d: any) => {
+      map[d.feature_id] = { valor: Number(d.valor_default) || 0, regla: (d.regla || 'fijo') as Regla, direccion: d.direccion === 'menor' ? 'menor' : 'mayor', preferido: d.preferido || '' }
+    })
+    setCatalogo(map)
+  }
+  function abrirCatalogo() { setCatDraft(JSON.parse(JSON.stringify(catalogo))); setCatOpen(true) }
+  function setCatItem(fid: string, patch: Partial<ItemCatalogo>) {
+    setCatDraft(prev => {
+      const base: ItemCatalogo = prev[fid] || { valor: 0, regla: 'fijo', direccion: 'mayor', preferido: '' }
+      return { ...prev, [fid]: { ...base, ...patch } }
+    })
+  }
+  async function guardarCatalogo() {
+    setCatSaving(true)
+    const rows = Object.entries(catDraft).map(([feature_id, it]) => ({
+      feature_id, valor_default: it.valor || 0, regla: it.regla, direccion: it.direccion, preferido: it.preferido?.trim() || null,
+    }))
+    const { error } = await supabase.from('valor_cliente_items').upsert(rows, { onConflict: 'feature_id' })
+    setCatSaving(false)
+    if (error) { toast('Error al guardar el catálogo: ' + error.message); return }
+    setCatalogo(catDraft); setCatOpen(false); toast('Catálogo guardado ✓')
   }
   function cargar(row: any) {
     setEj({
       id: row.id, nombre: row.nombre || '', tipo: row.tipo || '',
       reference_model_id: row.reference_model_id || '', competitor_ids: row.competitor_ids || [],
-      feature_ids: row.feature_ids ?? null, precio_km: row.precio_km ?? 16,
+      feature_ids: row.feature_ids ?? null,
       precios: row.precios || {}, ajustes: row.ajustes || {}, notas: row.notas || '',
     })
     setDirty(false)
@@ -146,33 +179,64 @@ export default function ValorCliente({ models, categories, features, values, lan
     )
   }, [categories, features, ej.feature_ids, lang])
 
-  function ajusteDe(compId: string, f: any): number {
-    if (autonomiaFeat && f.id === autonomiaFeat.id && refModel) {
-      const k1 = parseFloat(getVal(f.id, refModel.id)); const k2 = parseFloat(getVal(f.id, compId))
-      if (isNaN(k1) || isNaN(k2)) return 0
-      return Math.round((k1 - k2) * ej.precio_km)
+  // Ítem de catálogo de una característica (la autonomía tiene 16 €/km por defecto si no está en el catálogo)
+  function itemDe(f: any): ItemCatalogo | null {
+    const it = catalogo[f.id]
+    if (it && it.valor) return it
+    if (autonomiaFeat && f.id === autonomiaFeat.id) return { valor: 16, regla: 'unidad', direccion: 'mayor', preferido: '' }
+    return null
+  }
+  // Ajuste AUTOMÁTICO según el catálogo, comparando referencia y competidor
+  function ajusteAuto(compId: string, f: any): number {
+    if (!refModel) return 0
+    const it = itemDe(f); if (!it) return 0
+    const v1 = getVal(f.id, refModel.id), v2 = getVal(f.id, compId)
+    if (it.regla === 'texto') {
+      const pref = it.preferido.trim().toLowerCase(); if (!pref) return 0
+      const a = v1.trim().toLowerCase() === pref, b = v2.trim().toLowerCase() === pref
+      return a && !b ? it.valor : (!a && b ? -it.valor : 0)
     }
-    return ej.ajustes[compId]?.[f.id] ?? 0
+    if (isBoolVal(v1) && isBoolVal(v2)) {
+      const a = isYesVal(v1), b = isYesVal(v2)
+      return a && !b ? it.valor : (!a && b ? -it.valor : 0)
+    }
+    if (isNumVal(v1) && isNumVal(v2)) {
+      const diff = (parseNum(v1) - parseNum(v2)) * (it.direccion === 'menor' ? -1 : 1)
+      if (it.regla === 'unidad') return Math.round(diff * it.valor)
+      return diff > 0 ? it.valor : diff < 0 ? -it.valor : 0
+    }
+    return 0
+  }
+  const esManual = (compId: string, featId: string) => ej.ajustes[compId]?.[featId] !== undefined
+  // Ajuste efectivo: la corrección manual prevalece sobre el automático
+  function ajusteDe(compId: string, f: any): number {
+    const manual = ej.ajustes[compId]?.[f.id]
+    return manual !== undefined ? manual : ajusteAuto(compId, f)
   }
   function setAjuste(compId: string, featId: string, valor: number) {
     const comp = { ...(ej.ajustes[compId] || {}) }
-    if (valor === 0) delete comp[featId]; else comp[featId] = valor
+    comp[featId] = valor                       // se guarda como corrección manual (aunque sea 0)
+    upd({ ajustes: { ...ej.ajustes, [compId]: comp } })
+  }
+  function quitarManual(compId: string, featId: string) {
+    const comp = { ...(ej.ajustes[compId] || {}) }
+    delete comp[featId]
     upd({ ajustes: { ...ej.ajustes, [compId]: comp } })
   }
 
-  // Reseteo de ajustes manuales del EJERCICIO EN CURSO (no toca otros ejercicios guardados).
-  // La autonomía no se resetea: es un cálculo, no un valor introducido.
+  // Reseteo: elimina las correcciones manuales del EJERCICIO EN CURSO y vuelve a los
+  // valores automáticos del catálogo. No toca otros ejercicios guardados.
   function resetAjustes(compId?: string) {
     const comp = compId ? compModels.find((c: any) => c.id === compId) : null
     const msg = comp
-      ? `¿Poner a 0 todos los ajustes de ${`${comp.brand} ${comp.name} ${comp.version || ''}`.trim()} en este ejercicio?`
-      : `¿Poner a 0 TODOS los ajustes manuales de este ejercicio (${compModels.length} competidores)?\nLos MSRP y la autonomía no se tocan.`
+      ? `¿Quitar las correcciones manuales de ${`${comp.brand} ${comp.name} ${comp.version || ''}`.trim()} y volver a los valores automáticos del catálogo?`
+      : `¿Quitar TODAS las correcciones manuales de este ejercicio (${compModels.length} competidores) y volver a los valores automáticos del catálogo?`
     if (!confirm(msg)) return
     if (compId) upd({ ajustes: { ...ej.ajustes, [compId]: {} } })
     else upd({ ajustes: {} })
   }
   const nAjustesManuales = useMemo(() =>
-    compModels.reduce((n: number, c: any) => n + Object.values(ej.ajustes[c.id] || {}).filter(v => v !== 0).length, 0)
+    compModels.reduce((n: number, c: any) => n + Object.keys(ej.ajustes[c.id] || {}).length, 0)
   , [ej.ajustes, compModels])
 
   useEffect(() => { if (headRow1.current) setHeadH(headRow1.current.offsetHeight) }, [compModels.length, refModel?.id])
@@ -190,32 +254,11 @@ export default function ValorCliente({ models, categories, features, values, lan
         difAjustada: precioAjustado - msrpRef, difAjustadaPct: msrpRef ? (precioAjustado - msrpRef) / msrpRef : 0,
       }
     })
-  }, [refModel, compModels, filas, ej.ajustes, ej.precios, ej.precio_km])
-
-  // Sugerencia automática de ajustes a partir de los valores por defecto por característica
-  const isBool = (v: string) => ['yes', 'no', 'sí', 'si'].includes(v.toLowerCase().trim())
-  const isYes = (v: string) => ['yes', 'sí', 'si'].includes(v.toLowerCase().trim())
-  const isNum = (v: string) => v.trim() !== '' && !isNaN(parseFloat(v.trim()))
-  function sugerirAjustes(compId: string): Record<string, number> {
-    const out: Record<string, number> = {}
-    if (!refModel) return out
-    features.forEach((f: any) => {
-      if (autonomiaFeat && f.id === autonomiaFeat.id) return
-      const mag = defaults[f.id] || 0; if (!mag) return
-      const v1 = getVal(f.id, refModel.id), v2 = getVal(f.id, compId)
-      let sign = 0
-      if (isBool(v1) && isBool(v2)) sign = isYes(v1) && !isYes(v2) ? 1 : !isYes(v1) && isYes(v2) ? -1 : 0
-      else if (isNum(v1) && isNum(v2)) { const a = parseFloat(v1), b = parseFloat(v2); sign = a > b ? 1 : a < b ? -1 : 0 }
-      if (sign) out[f.id] = sign * mag
-    })
-    return out
-  }
+  }, [refModel, compModels, filas, ej.ajustes, ej.precios, catalogo])
 
   // ---------- Acciones sobre competidores ----------
   function addCompetidor(id: string) {
-    const ajustes = { ...ej.ajustes }
-    if (!ajustes[id]) ajustes[id] = sugerirAjustes(id)
-    upd({ competitor_ids: [...ej.competitor_ids, id], ajustes })
+    upd({ competitor_ids: [...ej.competitor_ids, id] })
     setAddCompOpen(false)
   }
   function removeCompetidor(id: string) {
@@ -227,7 +270,17 @@ export default function ValorCliente({ models, categories, features, values, lan
     upd({ competitor_ids: arr })
   }
   function setReferencia(id: string) {
-    upd({ reference_model_id: id, competitor_ids: ej.competitor_ids.filter(x => x !== id) })
+    if (!id || id === ej.reference_model_id) return
+    const oldRef = ej.reference_model_id
+    let comps = ej.competitor_ids.filter(x => x !== id)
+    // Si la nueva referencia era un competidor, la antigua referencia pasa a competidor (como en el Excel)
+    if (oldRef && ej.competitor_ids.includes(id)) comps = [oldRef, ...comps]
+    let ajustes = ej.ajustes
+    if (nAjustesManuales > 0) {
+      const descartar = confirm(`Al cambiar la referencia, todos los ajustes se recalculan automáticamente desde el catálogo.\nHay ${nAjustesManuales} correcciones manuales hechas con la referencia anterior que dejan de tener sentido.\n\nAceptar = descartarlas (recomendado) · Cancelar = conservarlas`)
+      if (descartar) ajustes = {}
+    }
+    upd({ reference_model_id: id, competitor_ids: comps, ajustes })
   }
 
   // ---------- Filas visibles ----------
@@ -273,7 +326,7 @@ export default function ValorCliente({ models, categories, features, values, lan
     const row: any = {
       nombre: ej.nombre.trim(), tipo: ej.tipo.trim() || null,
       reference_model_id: ej.reference_model_id, competitor_ids: ej.competitor_ids,
-      feature_ids: ej.feature_ids, precio_km: ej.precio_km, precios: ej.precios, ajustes: ej.ajustes,
+      feature_ids: ej.feature_ids, precios: ej.precios, ajustes: ej.ajustes,
       notas: ej.notas || null, updated_at: new Date().toISOString(),
     }
     try {
@@ -324,7 +377,7 @@ export default function ValorCliente({ models, categories, features, values, lan
       titulo: ej.nombre || 'Valor Cliente',
       tipo: ej.tipo,
       fecha: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' }),
-      precioKm: ej.precio_km,
+      precioKm: autonomiaFeat ? (itemDe(autonomiaFeat)?.valor ?? 16) : 16,
       ref: base(refModel),
       comps: resumen.map((r: any) => ({ ...base(r.model), totalAjustes: r.total, precioAjustado: r.precioAjustado, difMsrp: r.difMsrp, difMsrpPct: r.difMsrpPct, difAjustada: r.difAjustada, difAjustadaPct: r.difAjustadaPct })),
       filas: filas.map((f: any) => ({
@@ -467,10 +520,7 @@ export default function ValorCliente({ models, categories, features, values, lan
           <div className="lg:col-span-2">
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-slate-600">Competidores <span className="text-slate-400 font-normal">({compModels.length})</span></label>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-slate-400">€/km autonomía</span>
-                <NumInput value={ej.precio_km} step={1} onCommit={n => upd({ precio_km: n })} className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center outline-none focus:border-blue-400" />
-              </div>
+              <span className="text-[11px] text-slate-400">Los ajustes se calculan solos desde el <button onClick={abrirCatalogo} className="text-blue-600 font-bold hover:underline">catálogo de valores</button></span>
             </div>
             <div className="flex flex-wrap gap-2 min-h-[44px]">
               {compModels.map((c: any, idx: number) => (
@@ -548,10 +598,11 @@ export default function ValorCliente({ models, categories, features, values, lan
               {hiddenWithValue > 0 && <span className="text-amber-600">{hiddenWithValue} con ajuste ocultas (no suman)</span>}
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-400 hidden md:inline">Ajuste <span className="text-emerald-600 font-bold">+</span> la referencia tiene algo que el competidor no · <span className="text-red-600 font-bold">−</span> el competidor tiene algo que la referencia no</span>
-              <button onClick={() => resetAjustes()} disabled={nAjustesManuales === 0} title="Poner a 0 todos los ajustes manuales de este ejercicio"
+              <span className="text-[11px] text-slate-400 hidden xl:inline">Ajuste <span className="text-emerald-600 font-bold">+</span> la referencia tiene algo que el competidor no · <span className="text-red-600 font-bold">−</span> al revés · <span className="text-amber-500 font-bold">●</span> corrección manual</span>
+              <button onClick={abrirCatalogo} className={btnGhost}>⚙ Catálogo de valores</button>
+              <button onClick={() => resetAjustes()} disabled={nAjustesManuales === 0} title="Quitar las correcciones manuales y volver a los valores automáticos"
                 className={`${btn} border-red-100 bg-white text-red-500 hover:bg-red-50 disabled:opacity-40`}>
-                ↺ Resetear ajustes{nAjustesManuales > 0 && <span className="ml-1 text-red-300">({nAjustesManuales})</span>}
+                ↺ Quitar correcciones{nAjustesManuales > 0 && <span className="ml-1 text-red-300">({nAjustesManuales})</span>}
               </button>
               <button onClick={() => setShowRows(true)} className={btnGhost}>Filas visibles</button>
             </div>
@@ -582,9 +633,7 @@ export default function ValorCliente({ models, categories, features, values, lan
                       <th key={c.id + 'v'} style={{ top: headH }} className="bg-[#1c3050] text-white text-center px-1 py-2 font-black text-[11px] border border-[#1a2f4a] border-l-2 border-l-slate-400 sticky z-30">{c.name} {c.version}</th>
                       <th key={c.id + 'a'} style={{ top: headH }} className="bg-[#1c3050] text-[#a8c4e8] text-center px-1 py-2 font-black text-[10px] border border-[#1a2f4a] sticky z-30">
                         Ajuste €
-                        <button title="Sugerir ajustes desde los valores por defecto" onClick={() => { if (confirm(`¿Sustituir los ajustes de ${c.brand} ${c.name} por la sugerencia automática?`)) upd({ ajustes: { ...ej.ajustes, [c.id]: sugerirAjustes(c.id) } }) }}
-                          className="ml-1 text-[9px] text-[#7aa4cc] hover:text-white">⟳</button>
-                        <button title="Poner a 0 los ajustes de este modelo (solo en este ejercicio)" onClick={() => resetAjustes(c.id)}
+                        <button title="Quitar las correcciones manuales de este modelo y volver a los valores automáticos" onClick={() => resetAjustes(c.id)}
                           className="ml-1 text-[9px] text-[#7aa4cc] hover:text-red-300">↺</button>
                       </th>
                     </Fragment>
@@ -631,7 +680,7 @@ export default function ValorCliente({ models, categories, features, values, lan
                     <tr key={f.id} className={`${f.isFirst ? 'border-t-2 border-slate-300' : ''} ${dim ? 'opacity-45' : ''}`}>
                       <td className="border border-slate-100 px-2 py-1.5 text-[11px] font-bold text-slate-500 bg-slate-50 whitespace-nowrap overflow-hidden text-ellipsis">{f.isFirst ? f.catName : ''}</td>
                       <td className="border border-slate-100 px-2 py-1.5 text-[11px] text-slate-700 whitespace-nowrap overflow-hidden text-ellipsis" title={getName(f, lang)}>
-                        {getName(f, lang)}{isAut && <span className="text-[8px] text-slate-400 ml-1">×{ej.precio_km} €/km</span>}
+                        {getName(f, lang)}{isAut && <span className="text-[8px] text-slate-400 ml-1">×{itemDe(f)?.valor ?? 16} €/km</span>}
                       </td>
                       <td className={`border border-slate-100 px-2 py-1.5 text-center ${refCol} ${valCls(refV)}`} title={refV}>{displayVal(refV)}</td>
                       {compModels.map((c: any, gi: number) => {
@@ -640,11 +689,12 @@ export default function ValorCliente({ models, categories, features, values, lan
                           <Fragment key={c.id}>
                             <td key={c.id + 'v'} className={`border border-slate-100 px-2 py-1.5 text-center ${edge} ${grp(gi)} ${valCls(v)}`} title={v}>{displayVal(v)}</td>
                             <td key={c.id + 'a'} className={`border border-slate-100 px-1 py-1 text-center ${grp(gi)}`}>
-                              {isAut ? (
-                                <span className={`inline-block w-24 text-right font-bold text-xs rounded-lg px-2 py-1 border ${ajCls(a)}`} title={`(${parseFloat(refV) || 0} − ${parseFloat(v) || 0}) × ${ej.precio_km}`}>{a !== 0 ? fmtEur(a, true) : '—'}</span>
-                              ) : (
+                              <div className="inline-flex items-center gap-1">
+                                {esManual(c.id, f.id)
+                                  ? <button onClick={() => quitarManual(c.id, f.id)} title={`Corrección manual (automático: ${fmtEur(ajusteAuto(c.id, f), true)}). Pulsa para volver al automático`} className="w-2 h-2 rounded-full bg-amber-400 hover:bg-amber-600 shrink-0" />
+                                  : <span className="w-2 h-2 shrink-0" />}
                                 <NumInput value={a} onCommit={n => setAjuste(c.id, f.id, n)} className={`w-24 text-right font-bold text-xs rounded-lg px-2 py-1 border outline-none focus:border-blue-400 ${ajCls(a)}`} />
-                              )}
+                              </div>
                             </td>
                           </Fragment>
                         )
@@ -705,6 +755,93 @@ export default function ValorCliente({ models, categories, features, values, lan
           <label className="block text-xs font-bold text-slate-500 mb-1">Notas del ejercicio</label>
           <textarea rows={2} value={ej.notas} onChange={e => upd({ notas: e.target.value })} placeholder="Hipótesis, fuentes de precios estimados, comentarios para el comité…"
             className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-400 resize-none" />
+        </div>
+      )}
+
+      {/* MODAL CATÁLOGO DE VALORES */}
+      {catOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setCatOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div>
+                <div className="font-black text-base">Catálogo de valores cliente</div>
+                <div className="text-xs text-slate-400">Cuánto vale cada característica y cómo se aplica. Es común a todos los ejercicios: los ajustes automáticos se recalculan al guardar.</div>
+              </div>
+              <button onClick={() => setCatOpen(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            </div>
+            <div className="px-6 py-2 border-b border-slate-100 text-[11px] text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
+              <span><b>Fijo</b>: importe único cuando uno lo tiene (sí/no) o es mejor (numérico).</span>
+              <span><b>Por unidad</b>: importe × diferencia numérica (ej. 16 €/km).</span>
+              <span><b>Texto preferido</b>: importe si uno tiene el valor preferido y el otro no (ej. "Leather").</span>
+              <span><b>Dirección</b>: en numéricos, si es mejor mayor (potencia) o menor (peso).</span>
+            </div>
+            <div className="overflow-y-auto p-4">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="text-[10px] font-black text-slate-500 uppercase">
+                    <th className="text-left px-2 py-1">Característica</th>
+                    <th className="text-left px-2 py-1 w-20">Tipo</th>
+                    <th className="text-right px-2 py-1 w-24">Valor €</th>
+                    <th className="text-left px-2 py-1 w-32">Regla</th>
+                    <th className="text-left px-2 py-1 w-28">Dirección</th>
+                    <th className="text-left px-2 py-1 w-40">Valor preferido</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {categories.map((cat: any) => {
+                    const fs = features.filter((f: any) => f.category_id === cat.id); if (!fs.length) return null
+                    return (
+                      <Fragment key={cat.id}>
+                        <tr><td colSpan={6} className="px-2 pt-4 pb-1 text-[10px] font-black text-slate-400 uppercase tracking-wider border-b border-slate-100">{getName(cat, lang)}</td></tr>
+                        {fs.map((f: any) => {
+                          const it: ItemCatalogo = catDraft[f.id] || { valor: 0, regla: 'fijo', direccion: 'mayor', preferido: '' }
+                          const isB = f.type === 'boolean'
+                          const sel = "border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white outline-none focus:border-blue-400"
+                          return (
+                            <tr key={f.id} className={`border-b border-slate-50 ${it.valor ? '' : 'opacity-60'}`}>
+                              <td className="px-2 py-1 text-slate-700">{getName(f, lang)}</td>
+                              <td className="px-2 py-1"><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${isB ? 'bg-emerald-50 text-emerald-600' : f.type === 'numeric' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>{isB ? 'sí/no' : f.type === 'numeric' ? 'numérico' : 'texto'}</span></td>
+                              <td className="px-2 py-1 text-right">
+                                <input type="number" step={50} value={it.valor || ''} placeholder="0" onWheel={e => (e.target as HTMLInputElement).blur()}
+                                  onChange={e => setCatItem(f.id, { valor: parseFloat(e.target.value) || 0 })}
+                                  className={`w-20 text-right font-bold ${sel} ${it.valor ? 'text-slate-900' : 'text-slate-400'}`} />
+                              </td>
+                              <td className="px-2 py-1">
+                                {isB ? <span className="text-slate-400">fijo</span> : (
+                                  <select value={it.regla} onChange={e => setCatItem(f.id, { regla: e.target.value as Regla })} className={sel}>
+                                    <option value="fijo">Fijo</option>
+                                    <option value="unidad">Por unidad</option>
+                                    <option value="texto">Texto preferido</option>
+                                  </select>
+                                )}
+                              </td>
+                              <td className="px-2 py-1">
+                                {!isB && it.regla !== 'texto' ? (
+                                  <select value={it.direccion} onChange={e => setCatItem(f.id, { direccion: e.target.value as 'mayor' | 'menor' })} className={sel}>
+                                    <option value="mayor">Mayor es mejor</option>
+                                    <option value="menor">Menor es mejor</option>
+                                  </select>
+                                ) : <span className="text-slate-300">—</span>}
+                              </td>
+                              <td className="px-2 py-1">
+                                {it.regla === 'texto' ? (
+                                  <input value={it.preferido} onChange={e => setCatItem(f.id, { preferido: e.target.value })} placeholder="ej. Leather" className={`w-36 ${sel}`} />
+                                ) : <span className="text-slate-300">—</span>}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-6 py-3 border-t border-slate-100 flex justify-end gap-2">
+              <button onClick={() => setCatOpen(false)} className={btnGhost}>Cancelar</button>
+              <button onClick={guardarCatalogo} disabled={catSaving} className={btnDark}>{catSaving ? 'Guardando…' : 'Guardar catálogo'}</button>
+            </div>
+          </div>
         </div>
       )}
 
