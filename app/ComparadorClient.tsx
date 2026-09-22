@@ -35,6 +35,60 @@ function getName(item: any, lang: Lang) {
   return item.name
 }
 
+// ============ RANKING: ordenación de valores "sucios" ============
+// Los datos de las fichas no son números limpios ("4h 44m", "7 - 9 h", "17990€ - 23560€",
+// "12,96", "—"). Estas reglas los convierten en un número comparable:
+//  - vacío, "—", "N/A" → null (siempre al final)
+//  - tiempos "4h 30m", "5h", "7 - 9 h", "45 min" → minutos; en campos de tiempo, un número
+//    suelto ("7") se interpreta como horas
+//  - rangos → primer valor; puntos de miles y coma decimal se entienden
+export function parseSortValue(raw: any, isTime = false): number | null {
+  if (raw === null || raw === undefined) return null
+  const s = String(raw).trim().toLowerCase()
+  if (!s || s === '—' || s === '-' || s === 'n/a' || s === 'na' || s === 'no') return null
+  // Rango "7 - 9 h" / "17990€ - 23560€": siempre el primer valor
+  const rg = /^(\d+(?:[.,]\d+)?)\s*[-–]\s*\d+(?:[.,]\d+)?\s*(h|min)?/.exec(s.replace(/\.(?=\d{3}\b)/g, ''))
+  if (rg) { const n = parseFloat(rg[1].replace(',', '.')); return rg[2] === 'min' ? n : (rg[2] === 'h' || isTime) ? n * 60 : n }
+  const tm = /(\d+(?:[.,]\d+)?)\s*h(?:\s*(\d+)\s*m)?/.exec(s)
+  if (tm) return parseFloat(tm[1].replace(',', '.')) * 60 + (tm[2] ? parseInt(tm[2]) : 0)
+  const mm = /^(\d+(?:[.,]\d+)?)\s*min/.exec(s)
+  if (mm) return parseFloat(mm[1].replace(',', '.'))
+  const nm = /-?\d+(?:[.,]\d+)?/.exec(s.replace(/\.(?=\d{3}\b)/g, ''))
+  if (!nm) return null
+  const n = parseFloat(nm[0].replace(',', '.'))
+  if (isNaN(n)) return null
+  return isTime ? n * 60 : n
+}
+// Campo de tiempo (carga, aceleración): se detecta por su nombre
+export function isTimeField(field: any): boolean {
+  const s = `${field?.label || ''} ${field?.feature_name || ''}`.toLowerCase()
+  return /\(h\)|\(s\)|\(min\)|carga|charg|tiempo|time|0 ?- ?50/.test(s)
+}
+// Dirección "mejor": la guardada en Configuración o, si no hay, una heurística por nombre
+export function fieldBetter(field: any): 'mayor' | 'menor' {
+  if (field?.better === 'mayor' || field?.better === 'menor') return field.better
+  const s = `${field?.label || ''} ${field?.feature_name || ''}`.toLowerCase()
+  return /precio|price|msrp|carga|charg|peso|weight|mass|masa|tiempo|time|0 ?- ?50|consum|radio de giro|turning/.test(s) ? 'menor' : 'mayor'
+}
+// Unidad del campo, a partir del paréntesis de la etiqueta: "Autonomía WMTC (km)" → "km"
+export function fieldUnit(field: any): string {
+  const m = /\(([^)]+)\)/.exec(`${field?.label || ''}`) || /\(([^)]+)\)/.exec(`${field?.feature_name || ''}`)
+  return m ? m[1] : ''
+}
+// Diferencia respecto al líder, formateada ("−5 km", "+1h 14m", "+2.000 €")
+export function fmtDelta(diff: number, field: any): string {
+  if (!isFinite(diff) || Math.abs(diff) < 1e-9) return ''
+  const sign = diff > 0 ? '+' : '−'
+  const a = Math.abs(diff)
+  if (isTimeField(field)) {
+    const h = Math.floor(a / 60), m = Math.round(a % 60)
+    return sign + (h ? `${h}h ` : '') + (m || !h ? `${m}m` : '').trim()
+  }
+  const unit = fieldUnit(field)
+  const num = a.toLocaleString('de-DE', { maximumFractionDigits: 1 })  // 2.000 / 12,5 (mismo formato que en España)
+  return `${sign}${num}${unit ? ' ' + unit : ''}`
+}
+
 function formatDate(iso: string) {
   const d = new Date(iso)
   return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -127,11 +181,39 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>(models.slice(0, 3).map((m: any) => m.id))
 
+  // ---------- Formato del bloque Modelos, bloques plegados y criterio de orden ----------
+  type Layout = 'cards' | 'ranking'
+  type SortDir = 'best' | 'worst'
+  const [layout, setLayoutState] = useState<Layout>('ranking')
+  const [showModelos, setShowModelosState] = useState(true)
+  const [showFicha, setShowFichaState] = useState(true)
+  const [sortField, setSortField] = useState<string | null>(null)   // feature_name del campo de la card
+  const [sortDir, setSortDir] = useState<SortDir>('best')
+  const UI_KEY = 'comparador_ui'
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(UI_KEY); if (!raw) return
+      const ui = JSON.parse(raw)
+      if (ui.layout === 'cards' || ui.layout === 'ranking') setLayoutState(ui.layout)
+      if (typeof ui.showModelos === 'boolean') setShowModelosState(ui.showModelos)
+      if (typeof ui.showFicha === 'boolean') setShowFichaState(ui.showFicha)
+    } catch {}
+  }, [])
+  function persistUI(patch: any) {
+    try { const cur = JSON.parse(localStorage.getItem(UI_KEY) || '{}'); localStorage.setItem(UI_KEY, JSON.stringify({ ...cur, ...patch })) } catch {}
+  }
+  const setLayout = (l: Layout) => { setLayoutState(l); persistUI({ layout: l }) }
+  const setShowModelos = (v: boolean) => { setShowModelosState(v); persistUI({ showModelos: v }) }
+  const setShowFicha = (v: boolean) => { setShowFichaState(v); persistUI({ showFicha: v }) }
+
   // ---------- Vistas guardadas + filas visibles ----------
   // Una vista = modelos seleccionados (y su orden) + características ocultas.
   // Se guardan en la tabla settings (id 'comparador_vistas'), compartidas entre equipos.
   // Se guardan las OCULTAS (no las visibles) para que cualquier característica nueva aparezca por defecto.
-  type Vista = { id: string; nombre: string; model_ids: string[]; hidden_feature_ids: string[]; es_default: boolean }
+  type Vista = {
+    id: string; nombre: string; model_ids: string[]; hidden_feature_ids: string[]; es_default: boolean
+    layout?: Layout; sort?: { field: string; dir: SortDir } | null; blocks?: { modelos: boolean; ficha: boolean }
+  }
   const [vistas, setVistas] = useState<Vista[]>([])
   const [vistaId, setVistaId] = useState<string>('')
   const [hiddenIds, setHiddenIds] = useState<string[]>([])
@@ -153,6 +235,9 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
     const ids = (v.model_ids || []).filter(id => models.some((m: any) => m.id === id))
     if (ids.length > 0) setSelectedIds(ids)
     setHiddenIds(v.hidden_feature_ids || [])
+    if (v.layout) setLayout(v.layout)
+    if (v.blocks) { setShowModelos(v.blocks.modelos !== false); setShowFicha(v.blocks.ficha !== false) }
+    setSortField(v.sort?.field ?? null); setSortDir(v.sort?.dir ?? 'best')
     setVistaId(v.id)
   }
   async function persistVistas(list: Vista[]) {
@@ -172,6 +257,9 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
       nombre,
       model_ids: selectedIds,
       hidden_feature_ids: hiddenIds,
+      layout,
+      sort: sortField ? { field: sortField, dir: sortDir } : null,
+      blocks: { modelos: showModelos, ficha: showFicha },
       es_default: editando ? actual!.es_default : vistas.length === 0, // la primera vista creada es la de defecto
     }
     const list = editando ? vistas.map(v => v.id === nueva.id ? nueva : v) : [...vistas, nueva]
@@ -190,7 +278,9 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   const vistaActual = vistas.find(v => v.id === vistaId)
   const vistaDirty = !!vistaActual && (
     JSON.stringify(vistaActual.model_ids) !== JSON.stringify(selectedIds) ||
-    JSON.stringify([...(vistaActual.hidden_feature_ids || [])].sort()) !== JSON.stringify([...hiddenIds].sort())
+    JSON.stringify([...(vistaActual.hidden_feature_ids || [])].sort()) !== JSON.stringify([...hiddenIds].sort()) ||
+    (vistaActual.layout || 'ranking') !== layout ||
+    (vistaActual.sort?.field ?? null) !== sortField || (sortField !== null && (vistaActual.sort?.dir ?? 'best') !== sortDir)
   )
 
   const isHidden = (f: any) => hiddenIds.includes(f.id)
@@ -246,6 +336,7 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   // tabla, el Excel y el PDF. Cambiar aquí reordena todo automáticamente.
   function onCardDragStart(idx: number) {
     dragCardIdx.current = idx
+    if (sortField) { setSortField(null); setSortDir('best') }   // arrastrar = orden manual
   }
   function onCardDragOver(e: React.DragEvent, idx: number) {
     e.preventDefault() // necesario para permitir el "drop"
@@ -275,6 +366,44 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
     return val(f.id, modelId)
   }
   const activeCardFields = cardFields.filter((f: any) => f.enabled).sort((a: any, b: any) => a.order - b.order)
+
+  // ---------- Ranking: ordenar de mejor a peor y localizar el mejor valor por columna ----------
+  function sortIds(ids: string[], fieldName: string | null, dir: SortDir): string[] {
+    if (!fieldName) return ids
+    const field = activeCardFields.find((f: any) => f.feature_name === fieldName); if (!field) return ids
+    const better = fieldBetter(field), isTime = isTimeField(field)
+    const vals = new Map<string, number | null>(ids.map(id => [id, parseSortValue(specVal(fieldName, id), isTime)]))
+    const sign = (better === 'mayor' ? -1 : 1) * (dir === 'best' ? 1 : -1)
+    return [...ids].sort((a, b) => {
+      const va = vals.get(a) ?? null, vb = vals.get(b) ?? null
+      if (va === null && vb === null) return 0
+      if (va === null) return 1
+      if (vb === null) return -1
+      return (va - vb) * sign
+    })
+  }
+  // Clic en cabecera: mejor→peor, otro clic peor→mejor, otro clic vuelve al orden manual
+  function clickSort(fieldName: string) {
+    let f: string | null = fieldName, d: SortDir = 'best'
+    if (sortField === fieldName) { if (sortDir === 'best') d = 'worst'; else f = null }
+    setSortField(f); setSortDir(d)
+    if (f) setSelectedIds(prev => sortIds(prev, f, d))
+  }
+  function clearSort() { setSortField(null); setSortDir('best') }
+  function addModel(id: string) {
+    setSelectedIds(prev => sortIds([...prev, id], sortField, sortDir))
+    setShowPicker(false)
+  }
+  const sortFieldObj = sortField ? activeCardFields.find((f: any) => f.feature_name === sortField) : null
+  // Por columna: mejor valor entre los seleccionados (para marcarlo y calcular la diferencia al líder)
+  const rankingCols = activeCardFields.map((field: any) => {
+    const isTime = isTimeField(field), better = fieldBetter(field)
+    const vals = selectedModels.map((m: any) => parseSortValue(specVal(field.feature_name, m.id), isTime))
+    const nums = vals.filter((v): v is number => v !== null)
+    const best = nums.length ? (better === 'mayor' ? Math.max(...nums) : Math.min(...nums)) : null
+    return { field, isTime, better, best, vals }
+  })
+  const isBest = (col: any, i: number) => col.best !== null && col.vals[i] !== null && Math.abs(col.vals[i] - col.best) < 1e-9
   const filteredFeatures = categories.flatMap((cat: any) => {
     const feats = features.filter((f: any) => {
       if (f.category_id !== cat.id) return false
@@ -391,71 +520,199 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
         {vistaActual && !vistaActual.es_default && <button onClick={() => marcarDefault(vistaActual.id)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 whitespace-nowrap">★ Hacer por defecto</button>}
         {vistaActual && <button onClick={eliminarVista} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-100 bg-white text-red-500 hover:bg-red-50">Eliminar</button>}
         {vistaDirty && <span className="text-[11px] text-amber-600 font-bold">Cambios sin guardar en esta vista</span>}
-        <span className="text-[11px] text-slate-400 ml-auto hidden lg:inline">La vista ★ se carga al entrar. Guarda modelos, orden y filas visibles.</span>
+        <span className="text-[11px] text-slate-400 ml-auto hidden lg:inline">La vista ★ se carga al entrar. Guarda modelos, orden, formato y filas visibles.</span>
       </div>
-      <div className="overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 mb-8">
-        <div className="flex gap-3 items-stretch" style={{ minWidth: 'max-content' }}>
-          {selectedModels.map((m: any, idx: number) => (
-            <div key={m.id}
-              draggable
-              onDragStart={() => onCardDragStart(idx)}
-              onDragOver={e => onCardDragOver(e, idx)}
-              onDragEnd={onCardDragEnd}
-              className={`bg-white rounded-2xl border p-3 shadow-md w-40 shrink-0 relative group cursor-grab active:cursor-grabbing transition
-                ${dragOverIdx === idx ? 'border-blue-400 ring-2 ring-blue-200' : 'border-slate-200'}
-                ${dragCardIdx.current === idx ? 'opacity-40' : ''}`}>
-              <button onClick={() => selectedIds.length > 1 && setSelectedIds(selectedIds.filter(x => x !== m.id))}
-                onMouseDown={e => e.stopPropagation()}
-                className="absolute top-2 right-2 w-5 h-5 rounded-full bg-slate-100 text-slate-400 hover:bg-red-100 hover:text-red-500 text-xs font-bold opacity-0 group-hover:opacity-100 transition flex items-center justify-center z-10">✕</button>
-              <div className="text-[8px] font-black tracking-widest text-blue-600 uppercase">{m.brand} {m.name}</div>
-              <div className="font-black text-base tracking-tight mb-2">{m.version || m.name}</div>
-              <div className="h-20 flex items-center justify-center overflow-hidden mb-2 bg-slate-50 rounded-xl">
-                {m.img_url ? <img src={m.img_url} alt={m.name} className="max-h-20 max-w-full object-contain" /> : <span className="text-xs text-slate-400">{t.sinImagen}</span>}
-              </div>
-              {activeCardFields.map((field: any) => (
-                <div key={field.feature_name} className="flex justify-between border-t border-slate-100 pt-1 gap-1">
-                  <span className="text-[9px] text-slate-500 truncate">{field.label}</span>
-                  <span className="text-[9px] font-black text-slate-900 shrink-0">{specVal(field.feature_name, m.id)}</span>
+      {/* ================= BLOQUE MODELOS: Cards | Ranking ================= */}
+      <section className="bg-white rounded-2xl border border-slate-200 shadow-md mb-5">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 flex-wrap rounded-t-2xl">
+          <span className="text-xs font-black tracking-[.14em] text-slate-900">MODELOS</span>
+          <span className="text-xs font-bold text-slate-400">{selectedModels.length}</span>
+          <div className="flex border border-slate-200 rounded-full p-0.5 bg-slate-50">
+            <button onClick={() => setLayout('cards')} className={`px-3.5 py-1 rounded-full text-xs font-bold transition ${layout === 'cards' ? 'bg-[#081224] text-white' : 'text-slate-500 hover:text-slate-800'}`}>Cards</button>
+            <button onClick={() => setLayout('ranking')} className={`px-3.5 py-1 rounded-full text-xs font-bold transition ${layout === 'ranking' ? 'bg-[#081224] text-white' : 'text-slate-500 hover:text-slate-800'}`}>Ranking</button>
+          </div>
+          {sortFieldObj && (
+            <div className="flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded-full pl-3 pr-1 py-1">
+              <span className="text-xs font-bold text-blue-900">Ordenado por {sortFieldObj.label}</span>
+              <span className="text-[11px] text-blue-500">{sortDir === 'best' ? 'mejor → peor' : 'peor → mejor'}</span>
+              <button onClick={clearSort} title="Volver al orden manual" className="w-5 h-5 rounded-full bg-blue-100 hover:bg-blue-200 text-blue-900 text-[11px] font-black flex items-center justify-center">✕</button>
+            </div>
+          )}
+          <button onClick={() => setShowModelos(!showModelos)} className={`ml-auto px-3 py-1.5 text-xs font-bold rounded-full border transition ${showModelos ? 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50' : 'border-[#081224] bg-[#081224] text-white'}`}>
+            {showModelos ? 'Ocultar' : 'Mostrar'}
+          </button>
+        </div>
+
+        {showModelos && layout === 'ranking' && (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-[13px]" style={{ minWidth: `${420 + activeCardFields.length * 110}px` }}>
+                <thead>
+                  <tr className="bg-[#081224] text-white">
+                    <th className="text-left px-4 py-2.5 text-[10px] font-black tracking-widest w-11">#</th>
+                    <th className="text-left px-3 py-2.5 text-[10px] font-black tracking-widest w-[270px]">MODELO</th>
+                    {rankingCols.map((col: any) => {
+                      const active = sortField === col.field.feature_name
+                      return (
+                        <th key={col.field.feature_name} onClick={() => clickSort(col.field.feature_name)}
+                          title={`Ordenar de mejor a peor · ${col.better === 'mayor' ? 'mayor' : 'menor'} primero`}
+                          className={`text-center px-2 py-2.5 text-[10px] font-black tracking-wider uppercase cursor-pointer select-none transition ${active ? 'bg-blue-600 text-white' : 'text-[#a8c4e8] hover:text-white hover:bg-[#14243a]'}`}>
+                          {col.field.label} <span className={active ? 'text-white' : 'text-slate-500'}>{active ? (sortDir === 'best' ? '▼' : '▲') : '⇅'}</span>
+                        </th>
+                      )
+                    })}
+                    <th className="w-11"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedModels.map((m: any, idx: number) => {
+                    const isLiux = String(m.brand || '').toLowerCase().includes('liux')
+                    return (
+                      <tr key={m.id} className={`border-b border-slate-100 ${isLiux ? 'bg-blue-50/70' : ''}`}>
+                        <td className="px-4 py-2">
+                          <span className={`inline-flex w-[22px] h-[22px] rounded-full text-[11px] font-black items-center justify-center ${idx === 0 ? 'bg-slate-900 text-white' : isLiux ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`}>{idx + 1}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <a href={`/modelo/${m.id}`} className="flex items-center gap-3 group" title="Abrir ficha de catálogo">
+                            <div className={`w-[72px] h-11 rounded-[10px] border flex items-center justify-center overflow-hidden ${isLiux ? 'bg-white border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
+                              {m.img_url ? <img src={m.img_url} alt={m.name} className="max-h-11 max-w-full object-contain" /> : <span className="text-[10px] text-slate-400">{t.sinImagen}</span>}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-[9px] font-black tracking-[.15em] text-blue-600 uppercase truncate">{m.brand}</div>
+                              <div className="font-black text-[15px] leading-tight truncate group-hover:text-blue-700">{m.name} <span className="text-slate-500 font-bold">{m.version}</span></div>
+                            </div>
+                          </a>
+                        </td>
+                        {rankingCols.map((col: any) => {
+                          const raw = specVal(col.field.feature_name, m.id)
+                          const v = col.vals[idx]
+                          const active = sortField === col.field.feature_name
+                          const best = isBest(col, idx)
+                          const empty = v === null
+                          const delta = active && !best && v !== null && col.best !== null ? fmtDelta(v - col.best, col.field) : ''
+                          return (
+                            <td key={col.field.feature_name}
+                              className={`text-center px-2 py-2 ${best ? 'bg-emerald-50 text-emerald-700 font-black' : active ? (isLiux ? 'bg-blue-100/70' : 'bg-blue-50') + ' text-blue-900 font-black' : empty ? 'text-slate-300' : 'text-slate-800'} ${active ? 'text-[15px]' : ''}`}
+                              title={raw}>
+                              {empty ? '—' : raw}
+                              {active && best && <div className="text-[9px] font-bold text-emerald-600">líder</div>}
+                              {delta && <div className="text-[9px] font-bold text-slate-500">{delta}</div>}
+                            </td>
+                          )
+                        })}
+                        <td className="text-center px-2 py-2">
+                          <button onClick={() => selectedIds.length > 1 && setSelectedIds(selectedIds.filter(x => x !== m.id))} title="Quitar"
+                            className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 hover:bg-red-100 hover:text-red-500 text-[11px] font-bold">✕</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-2.5 border-t border-slate-100 flex items-center gap-4 flex-wrap">
+              {availableModels.length > 0 && (
+                <div className="relative" ref={pickerRef}>
+                  <button onClick={() => setShowPicker(!showPicker)}
+                    className="border-2 border-dashed border-slate-300 bg-white text-slate-500 rounded-xl px-3.5 py-2 text-xs font-bold hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition">+ {t.añadirModelo}</button>
+                  {showPicker && (
+                    <div className="absolute top-full left-0 mt-1 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 z-30 overflow-hidden">
+                      <div className="px-4 py-3 border-b border-slate-100 text-xs font-black text-slate-500 uppercase tracking-wider">{t.seleccionaModelo}</div>
+                      <div className="max-h-64 overflow-y-auto">
+                        {availableModels.map((m: any) => (
+                          <button key={m.id} onClick={() => addModel(m.id)} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition text-left border-b border-slate-50">
+                            <div className="w-10 h-7 bg-slate-50 rounded-lg overflow-hidden shrink-0 flex items-center justify-center">{m.img_url ? <img src={m.img_url} className="max-w-full max-h-full object-contain" /> : <span className="text-[9px] text-slate-400">—</span>}</div>
+                            <div><div className="text-[8px] font-bold text-blue-600 uppercase">{m.brand}</div><div className="text-sm font-bold text-slate-800">{m.name} {m.version}</div></div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500"><span className="inline-block w-3 h-3 rounded-[3px] bg-emerald-100 border border-emerald-300"></span> mejor valor de la columna</span>
+              {!sortField && <span className="text-[11px] text-slate-400">Orden manual · clic en una cabecera para ordenar</span>}
+            </div>
+          </>
+        )}
+
+        {showModelos && layout === 'cards' && (
+          <div className="overflow-x-auto p-4">
+            <div className="flex gap-3 items-stretch" style={{ minWidth: 'max-content' }}>
+              {selectedModels.map((m: any, idx: number) => (
+                <div key={m.id}
+                  draggable
+                  onDragStart={() => onCardDragStart(idx)}
+                  onDragOver={e => onCardDragOver(e, idx)}
+                  onDragEnd={onCardDragEnd}
+                  className={`bg-white rounded-2xl border p-3 shadow-md w-40 shrink-0 relative group cursor-grab active:cursor-grabbing transition
+                    ${dragOverIdx === idx ? 'border-blue-400 ring-2 ring-blue-200' : 'border-slate-200'}
+                    ${dragCardIdx.current === idx ? 'opacity-40' : ''}`}>
+                  <button onClick={() => selectedIds.length > 1 && setSelectedIds(selectedIds.filter(x => x !== m.id))}
+                    onMouseDown={e => e.stopPropagation()}
+                    className="absolute top-2 right-2 w-5 h-5 rounded-full bg-slate-100 text-slate-400 hover:bg-red-100 hover:text-red-500 text-xs font-bold opacity-0 group-hover:opacity-100 transition flex items-center justify-center z-10">✕</button>
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="text-[9px] font-black tracking-widest text-blue-600 uppercase truncate">{m.brand} {m.name}</div>
+                    {sortField && <span className="text-[9px] font-black text-blue-900 bg-blue-100 rounded-full px-1.5 shrink-0">{idx + 1}º</span>}
+                  </div>
+                  <div className="font-black text-base tracking-tight mb-2">{m.version || m.name}</div>
+                  <div className="h-20 flex items-center justify-center overflow-hidden mb-2 bg-slate-50 rounded-xl">
+                    {m.img_url ? <img src={m.img_url} alt={m.name} className="max-h-20 max-w-full object-contain" /> : <span className="text-xs text-slate-400">{t.sinImagen}</span>}
+                  </div>
+                  {rankingCols.map((col: any) => {
+                    const active = sortField === col.field.feature_name
+                    const best = isBest(col, idx)
+                    return (
+                      <div key={col.field.feature_name} className={`flex justify-between border-t border-slate-100 pt-1 gap-1 ${active ? 'bg-blue-50 rounded px-1 -mx-1' : ''}`}>
+                        <span className={`text-[10px] truncate ${active ? 'text-blue-900 font-bold' : 'text-slate-500'}`}>{col.field.label}</span>
+                        <span className={`text-[10px] font-black shrink-0 ${best ? 'text-emerald-600' : 'text-slate-900'}`}>{specVal(col.field.feature_name, m.id)}</span>
+                      </div>
+                    )
+                  })}
                 </div>
               ))}
-            </div>
-          ))}
-          {availableModels.length > 0 && (
-            <div className="relative shrink-0" ref={pickerRef}>
-              <button onClick={() => setShowPicker(!showPicker)}
-                className="w-36 h-full min-h-[260px] border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition cursor-pointer bg-white">
-                <div className="w-8 h-8 rounded-full border-2 border-current flex items-center justify-center text-xl">+</div>
-                <div className="text-xs font-bold text-center px-2">{t.añadirModelo}</div>
-              </button>
-              {showPicker && (
-                <div className="absolute top-0 left-0 w-52 bg-white rounded-2xl shadow-xl border border-slate-200 z-20 overflow-hidden">
-                  <div className="px-4 py-3 border-b border-slate-100 text-xs font-black text-slate-500 uppercase tracking-wider">{t.seleccionaModelo}</div>
-                  <div className="max-h-64 overflow-y-auto">
-                    {availableModels.map((m: any) => (
-                      <button key={m.id} onClick={() => { setSelectedIds([...selectedIds, m.id]); setShowPicker(false) }}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition text-left border-b border-slate-50">
-                        <div className="w-10 h-7 bg-slate-50 rounded-lg overflow-hidden shrink-0 flex items-center justify-center">
-                          {m.img_url ? <img src={m.img_url} className="max-w-full max-h-full object-contain" /> : <span className="text-[9px] text-slate-400">—</span>}
-                        </div>
-                        <div>
-                          <div className="text-[8px] font-bold text-blue-600 uppercase">{m.brand}</div>
-                          <div className="text-sm font-bold text-slate-800">{m.version || m.name}</div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+              {availableModels.length > 0 && (
+                <div className="relative shrink-0" ref={pickerRef}>
+                  <button onClick={() => setShowPicker(!showPicker)}
+                    className="w-36 h-full min-h-[260px] border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition cursor-pointer bg-white">
+                    <div className="w-8 h-8 rounded-full border-2 border-current flex items-center justify-center text-xl">+</div>
+                    <div className="text-xs font-bold text-center px-2">{t.añadirModelo}</div>
+                  </button>
+                  {showPicker && (
+                    <div className="absolute top-0 left-0 w-52 bg-white rounded-2xl shadow-xl border border-slate-200 z-20 overflow-hidden">
+                      <div className="px-4 py-3 border-b border-slate-100 text-xs font-black text-slate-500 uppercase tracking-wider">{t.seleccionaModelo}</div>
+                      <div className="max-h-64 overflow-y-auto">
+                        {availableModels.map((m: any) => (
+                          <button key={m.id} onClick={() => addModel(m.id)}
+                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition text-left border-b border-slate-50">
+                            <div className="w-10 h-7 bg-slate-50 rounded-lg overflow-hidden shrink-0 flex items-center justify-center">
+                              {m.img_url ? <img src={m.img_url} className="max-w-full max-h-full object-contain" /> : <span className="text-[9px] text-slate-400">—</span>}
+                            </div>
+                            <div>
+                              <div className="text-[8px] font-bold text-blue-600 uppercase">{m.brand}</div>
+                              <div className="text-sm font-bold text-slate-800">{m.version || m.name}</div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+        )}
+      </section>
+
+      {/* ================= BLOQUE FICHA COMPLETA ================= */}
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-3 gap-2">
-        <h2 className="text-xl font-black tracking-tight">{t.fichaCompleta}</h2>
         <div className="flex items-center gap-2">
+          <span className="text-xs font-black tracking-[.14em] text-slate-900">FICHA COMPLETA</span>
+          <span className="text-xs font-bold text-slate-400">{filteredFeatures.length} {t.espec}{hiddenIds.length > 0 && <span className="text-amber-600"> · {hiddenIds.length} ocultas</span>}</span>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
           <input type="text" placeholder={t.buscar} value={search} onChange={e => setSearch(e.target.value)}
             className="border border-slate-200 rounded-full px-3 py-2 text-sm outline-none focus:border-blue-400 flex-1 md:min-w-[200px]" />
-          <span className="text-xs text-slate-400 whitespace-nowrap">{filteredFeatures.length} {t.espec}{hiddenIds.length > 0 && <span className="text-amber-600"> · {hiddenIds.length} ocultas</span>}</span>
           <button onClick={() => setShowRows(true)} title="Elegir qué categorías y características se muestran"
             className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:border-slate-400 text-slate-700 text-xs font-bold rounded-full transition whitespace-nowrap">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 6h16M4 12h10M4 18h6"/></svg>
@@ -471,8 +728,12 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             {exportingPdf ? 'Generando…' : 'PDF'}
           </button>
+          <button onClick={() => setShowFicha(!showFicha)} className={`px-3 py-2 text-xs font-bold rounded-full border transition whitespace-nowrap ${showFicha ? 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50' : 'border-[#081224] bg-[#081224] text-white'}`}>
+            {showFicha ? 'Ocultar' : 'Mostrar'}
+          </button>
         </div>
       </div>
+      {showFicha && (<>
       <div className="flex gap-2 flex-wrap mb-4">
         {[{ id: 'all', name: t.todo }, ...categories.filter((c: any) => !catFullyHidden(c.id)).map((c: any) => ({ ...c, name: getName(c, lang) }))].map((c: any) => (
           <button key={c.id} onClick={() => setActiveCat(c.id)}
@@ -523,6 +784,8 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
           </tbody>
         </table>
       </div>
+
+      </>)}
 
       {/* MODAL FILAS VISIBLES */}
       {showRows && (
@@ -1149,8 +1412,8 @@ function Configuracion({ features }: { features: any[] }) {
       <p className="text-slate-500 text-sm mb-6">Personaliza los campos que se muestran en las tarjetas del comparador</p>
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mb-4">
         <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
-          <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Campos de las tarjetas</span>
-          <span className="text-xs text-slate-400">Arrastra para reordenar</span>
+          <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Campos de las tarjetas y del ranking</span>
+          <span className="text-xs text-slate-400">Arrastra para reordenar · "Mayor/Menor es mejor" decide el orden del ranking</span>
         </div>
         <div className="divide-y divide-slate-50">
           {fields.map((field, idx) => (
@@ -1160,6 +1423,12 @@ function Configuracion({ features }: { features: any[] }) {
               <div className="w-5 text-xs font-bold text-slate-300">{idx + 1}</div>
               <input className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-400" value={field.label} onChange={e => updateLabel(idx, e.target.value)} onBlur={saveLabel} />
               <div className="text-xs text-slate-400 truncate max-w-[200px] hidden md:block">{field.feature_name}</div>
+              <select value={fieldBetter(field)} onChange={e => save(fields.map((f, i) => i === idx ? { ...f, better: e.target.value } : f))}
+                title="Criterio para ordenar el ranking de mejor a peor y marcar el mejor valor"
+                className={`border rounded-lg px-2 py-1 text-xs font-bold outline-none focus:border-blue-400 ${fieldBetter(field) === 'menor' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                <option value="mayor">Mayor es mejor</option>
+                <option value="menor">Menor es mejor</option>
+              </select>
               <button onClick={() => toggleField(idx)} className={`px-3 py-1 text-xs font-bold rounded-full transition ${field.enabled ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{field.enabled ? 'Visible' : 'Oculto'}</button>
               <button onClick={() => removeField(idx)} className="text-slate-300 hover:text-red-400 transition text-sm">🗑</button>
             </div>
