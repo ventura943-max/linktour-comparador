@@ -546,42 +546,50 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
         {showModelos && layout === 'ranking' && (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-[13px]" style={{ minWidth: `${420 + activeCardFields.length * 110}px` }}>
+              <table className="w-full border-collapse text-[12px]" style={{ tableLayout: 'fixed', minWidth: `${250 + activeCardFields.length * 78}px` }}>
+                <colgroup>
+                  {/* Posición y modelo con ancho fijo; las columnas de campos se reparten el resto */}
+                  <col style={{ width: 36 }} /><col style={{ width: 200 }} />
+                  {activeCardFields.map((f: any) => <col key={f.feature_name} />)}
+                </colgroup>
                 <thead>
                   <tr className="bg-[#081224] text-white">
-                    <th className="text-left px-4 py-2.5 text-[10px] font-black tracking-widest w-11">#</th>
-                    <th className="text-left px-3 py-2.5 text-[10px] font-black tracking-widest w-[270px]">MODELO</th>
+                    <th className="text-left px-2 py-2 text-[10px] font-black tracking-widest">#</th>
+                    <th className="text-left px-2 py-2 text-[10px] font-black tracking-widest">MODELO</th>
                     {rankingCols.map((col: any) => {
                       const active = sortField === col.field.feature_name
                       return (
                         <th key={col.field.feature_name} onClick={() => clickSort(col.field.feature_name)}
                           title={`Ordenar de mejor a peor · ${col.better === 'mayor' ? 'mayor' : 'menor'} primero`}
-                          className={`text-center px-2 py-2.5 text-[10px] font-black tracking-wider uppercase cursor-pointer select-none transition ${active ? 'bg-blue-600 text-white' : 'text-[#a8c4e8] hover:text-white hover:bg-[#14243a]'}`}>
-                          {col.field.label} <span className={active ? 'text-white' : 'text-slate-500'}>{active ? (sortDir === 'best' ? '▼' : '▲') : '⇅'}</span>
+                          className={`text-center px-1 py-1.5 text-[9px] leading-tight font-black tracking-wide uppercase cursor-pointer select-none transition ${active ? 'bg-blue-600 text-white' : 'text-[#a8c4e8] hover:text-white hover:bg-[#14243a]'}`}>
+                          {col.field.label}<br /><span className={active ? 'text-white' : 'text-slate-500'}>{active ? (sortDir === 'best' ? '▼' : '▲') : '⇅'}</span>
                         </th>
                       )
                     })}
-                    <th className="w-11"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {selectedModels.map((m: any, idx: number) => {
                     const isLiux = String(m.brand || '').toLowerCase().includes('liux')
                     return (
-                      <tr key={m.id} className={`border-b border-slate-100 ${isLiux ? 'bg-blue-50/70' : ''}`}>
-                        <td className="px-4 py-2">
-                          <span className={`inline-flex w-[22px] h-[22px] rounded-full text-[11px] font-black items-center justify-center ${idx === 0 ? 'bg-slate-900 text-white' : isLiux ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`}>{idx + 1}</span>
+                      <tr key={m.id} className={`border-b border-slate-100 group/row ${isLiux ? 'bg-blue-50/70' : ''}`}>
+                        <td className="px-2 py-1.5">
+                          <span className={`inline-flex w-5 h-5 rounded-full text-[10px] font-black items-center justify-center ${idx === 0 ? 'bg-slate-900 text-white' : isLiux ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`}>{idx + 1}</span>
                         </td>
-                        <td className="px-3 py-2">
-                          <a href={`/modelo/${m.id}`} className="flex items-center gap-3 group" title="Abrir ficha de catálogo">
-                            <div className={`w-[72px] h-11 rounded-[10px] border flex items-center justify-center overflow-hidden ${isLiux ? 'bg-white border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
-                              {m.img_url ? <img src={m.img_url} alt={m.name} className="max-h-11 max-w-full object-contain" /> : <span className="text-[10px] text-slate-400">{t.sinImagen}</span>}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="text-[9px] font-black tracking-[.15em] text-blue-600 uppercase truncate">{m.brand}</div>
-                              <div className="font-black text-[15px] leading-tight truncate group-hover:text-blue-700">{m.name} <span className="text-slate-500 font-bold">{m.version}</span></div>
-                            </div>
-                          </a>
+                        <td className="px-2 py-1.5">
+                          <div className="flex items-center gap-2">
+                            <a href={`/modelo/${m.id}`} className="flex items-center gap-2 group min-w-0 flex-1" title="Abrir ficha de catálogo">
+                              <div className={`w-14 h-9 shrink-0 rounded-lg border flex items-center justify-center overflow-hidden ${isLiux ? 'bg-white border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
+                                {m.img_url ? <img src={m.img_url} alt={m.name} className="max-h-9 max-w-full object-contain" /> : <span className="text-[9px] text-slate-400">—</span>}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-[8px] font-black tracking-[.15em] text-blue-600 uppercase truncate">{m.brand}</div>
+                                <div className="font-black text-[13px] leading-tight truncate group-hover:text-blue-700">{m.name} <span className="text-slate-500 font-bold">{m.version}</span></div>
+                              </div>
+                            </a>
+                            <button onClick={() => selectedIds.length > 1 && setSelectedIds(selectedIds.filter(x => x !== m.id))} title="Quitar"
+                              className="w-5 h-5 shrink-0 rounded-full bg-slate-100 text-slate-400 hover:bg-red-100 hover:text-red-500 text-[10px] font-bold opacity-0 group-hover/row:opacity-100 transition">✕</button>
+                          </div>
                         </td>
                         {rankingCols.map((col: any) => {
                           const raw = specVal(col.field.feature_name, m.id)
@@ -592,7 +600,7 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
                           const delta = active && !best && v !== null && col.best !== null ? fmtDelta(v - col.best, col.field) : ''
                           return (
                             <td key={col.field.feature_name}
-                              className={`text-center px-2 py-2 ${best ? 'bg-emerald-50 text-emerald-700 font-black' : active ? (isLiux ? 'bg-blue-100/70' : 'bg-blue-50') + ' text-blue-900 font-black' : empty ? 'text-slate-300' : 'text-slate-800'} ${active ? 'text-[15px]' : ''}`}
+                              className={`text-center px-1 py-1.5 leading-tight break-words ${best ? 'bg-emerald-50 text-emerald-700 font-black' : active ? (isLiux ? 'bg-blue-100/70' : 'bg-blue-50') + ' text-blue-900 font-black' : empty ? 'text-slate-300' : 'text-slate-800'} ${active ? 'text-[14px]' : ''}`}
                               title={raw}>
                               {empty ? '—' : raw}
                               {active && best && <div className="text-[9px] font-bold text-emerald-600">líder</div>}
@@ -600,10 +608,6 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
                             </td>
                           )
                         })}
-                        <td className="text-center px-2 py-2">
-                          <button onClick={() => selectedIds.length > 1 && setSelectedIds(selectedIds.filter(x => x !== m.id))} title="Quitar"
-                            className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 hover:bg-red-100 hover:text-red-500 text-[11px] font-bold">✕</button>
-                        </td>
                       </tr>
                     )
                   })}
