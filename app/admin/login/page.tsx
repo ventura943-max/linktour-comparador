@@ -6,15 +6,20 @@ export default function LoginPage() {
   const [user, setUser] = useState('')
   const [pass, setPass] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
   const router = useRouter()
 
   async function handleLogin() {
+    if (!user || !pass) return
+    setLoading(true); setError('')
     const res = await fetch('/api/auth', {
       method: 'POST',
       body: JSON.stringify({ user, pass }),
       headers: { 'Content-Type': 'application/json' }
     })
+    setLoading(false)
     if (res.ok) {
+      router.refresh()
       router.push('/')
     } else {
       setError('Usuario o contraseña incorrectos')
@@ -31,15 +36,16 @@ export default function LoginPage() {
         {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3 mb-4">{error}</div>}
         <div className="mb-4">
           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Usuario</label>
-          <input className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-blue-400" value={user} onChange={e => setUser(e.target.value)} placeholder="admin" />
+          <input className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-blue-400" value={user} onChange={e => setUser(e.target.value)} placeholder="usuario" autoComplete="username" />
         </div>
         <div className="mb-6">
           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Contraseña</label>
-          <input type="password" className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-blue-400" value={pass} onChange={e => setPass(e.target.value)} placeholder="••••••••" onKeyDown={e => e.key === 'Enter' && handleLogin()} />
+          <input type="password" className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-blue-400" value={pass} onChange={e => setPass(e.target.value)} placeholder="••••••••" autoComplete="current-password" onKeyDown={e => e.key === 'Enter' && handleLogin()} />
         </div>
-        <button onClick={handleLogin} className="w-full bg-[#081224] text-white font-bold py-3 rounded-lg hover:bg-[#162040] transition">
-          Entrar
+        <button onClick={handleLogin} disabled={loading} className="w-full bg-[#081224] text-white font-bold py-3 rounded-lg hover:bg-[#162040] transition disabled:opacity-50">
+          {loading ? 'Entrando…' : 'Entrar'}
         </button>
+        <p className="text-[11px] text-slate-400 text-center mt-5">Perfil admin: gestión completa · Perfil consulta: comparar, filtrar y exportar</p>
       </div>
     </div>
   )

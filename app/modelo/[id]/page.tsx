@@ -1,12 +1,12 @@
 export const dynamic = 'force-dynamic'
-import { cookies } from 'next/headers'
 import { redirect, notFound } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { getRole } from '@/lib/role'
 import FichaModelo from './FichaModelo'
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
-  const cookieStore = await cookies()
-  if (!cookieStore.get('admin_session')) redirect('/admin/login')
+  const role = await getRole()
+  if (!role) redirect('/admin/login')
   const { id } = await params
 
   const [m, c, f, v, s, cf] = await Promise.all([
@@ -27,6 +27,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       values={v.data || []}
       sources={s.data || []}
       cardFields={cf.data?.value || []}
+      role={role}
     />
   )
 }

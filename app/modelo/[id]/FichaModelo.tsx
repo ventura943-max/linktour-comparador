@@ -28,7 +28,8 @@ async function imageToDataUrl(url: string): Promise<string | null> {
   } catch { return null }
 }
 
-export default function FichaModelo({ model, categories, features, values, sources, cardFields }: any) {
+export default function FichaModelo({ model, categories, features, values, sources, cardFields, role }: any) {
+  const isAdmin = role !== 'viewer'
   // Idioma: el mismo que el resto de la web (guardado en el navegador)
   const [lang, setLang] = useState<Lang>('es')
   useEffect(() => { try { const l = localStorage.getItem('liux_lang'); if (l === 'es' || l === 'en' || l === 'it') setLang(l) } catch {} }, [])
@@ -108,7 +109,7 @@ export default function FichaModelo({ model, categories, features, values, sourc
                 <button key={l.code} onClick={() => changeLang(l.code)} className={`px-2 py-1 rounded-lg text-xs font-bold transition ${lang === l.code ? 'bg-white/20 text-white' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}>{l.flag} {l.label}</button>
               ))}
             </div>
-            <a href={`/admin/nuevo-vehiculo?id=${model.id}`} className="px-3 py-2 text-xs font-bold rounded-full border border-white/20 hover:bg-white/10 transition">✏ {t.editar}</a>
+            {isAdmin && <a href={`/admin/nuevo-vehiculo?id=${model.id}`} className="px-3 py-2 text-xs font-bold rounded-full border border-white/20 hover:bg-white/10 transition">✏ {t.editar}</a>}
             <button onClick={exportPDF} disabled={exporting} className="flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-full transition disabled:opacity-50">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
               {exporting ? t.generando : t.pdf}

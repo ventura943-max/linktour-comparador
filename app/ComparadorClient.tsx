@@ -115,15 +115,15 @@ async function imageToDataUrl(url: string): Promise<string | null> {
   }
 }
 
-function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMobileOpen, lang, setLang, t }: any) {
-  const items = [
+function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMobileOpen, lang, setLang, t, isAdmin }: any) {
+  const items = ([
     { id: 'comparador', label: t.comparador, icon: <IconComparador /> },
     { id: 'modelos', label: t.modelos, icon: <IconModelos /> },
     { id: 'categorias', label: t.categorias, icon: <IconCategorias /> },
     { id: 'analisis', label: t.analisis, icon: <IconAnalisis /> },
     { id: 'valor', label: 'Valor Cliente', icon: <IconValor /> },
     { id: 'config', label: 'Configuración', icon: <IconConfig /> },
-  ]
+  ] as { id: string; label: string; icon: any }[]).filter(i => isAdmin || !['categorias', 'config'].includes(i.id))
   const w = collapsed ? 'w-16' : 'w-56'
   return (
     <>
@@ -134,6 +134,7 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
             <div>
               <div className="font-black text-lg tracking-widest text-white leading-none">LIUX</div>
               <div className="text-[8px] tracking-[.3em] text-slate-400 mt-0.5">{t.appName}</div>
+              <div className={`mt-1 inline-block text-[8px] font-black tracking-widest px-1.5 py-0.5 rounded ${isAdmin ? 'bg-blue-500/20 text-blue-200' : 'bg-white/10 text-slate-300'}`}>{isAdmin ? 'ADMIN' : 'CONSULTA'}</div>
             </div>
           )}
           <button onClick={() => setCollapsed(!collapsed)}
@@ -176,7 +177,7 @@ function Sidebar({ active, setActive, collapsed, setCollapsed, mobileOpen, setMo
   )
 }
 
-function Comparador({ models, categories, features, values, t, lang, cardFields }: any) {
+function Comparador({ models, categories, features, values, t, lang, cardFields, isAdmin }: any) {
   const [activeCat, setActiveCat] = useState('all')
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>(models.slice(0, 3).map((m: any) => m.id))
@@ -512,15 +513,15 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
           <option value="">Selección manual (sin vista)</option>
           {vistas.map(v => <option key={v.id} value={v.id}>{v.es_default ? '★ ' : ''}{v.nombre}</option>)}
         </select>
-        <button onClick={() => guardarVista(false)} disabled={savingVista}
+        {isAdmin && <button onClick={() => guardarVista(false)} disabled={savingVista}
           className="px-3 py-1.5 text-xs font-bold rounded-lg bg-[#081224] text-white hover:bg-[#162040] disabled:opacity-50 whitespace-nowrap">
           {vistaActual ? 'Guardar cambios' : 'Guardar como vista'}
-        </button>
-        {vistaActual && <button onClick={() => guardarVista(true)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 whitespace-nowrap">Guardar como nueva</button>}
-        {vistaActual && !vistaActual.es_default && <button onClick={() => marcarDefault(vistaActual.id)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 whitespace-nowrap">★ Hacer por defecto</button>}
-        {vistaActual && <button onClick={eliminarVista} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-100 bg-white text-red-500 hover:bg-red-50">Eliminar</button>}
-        {vistaDirty && <span className="text-[11px] text-amber-600 font-bold">Cambios sin guardar en esta vista</span>}
-        <span className="text-[11px] text-slate-400 ml-auto hidden lg:inline">La vista ★ se carga al entrar. Guarda modelos, orden, formato y filas visibles.</span>
+        </button>}
+        {isAdmin && vistaActual && <button onClick={() => guardarVista(true)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 whitespace-nowrap">Guardar como nueva</button>}
+        {isAdmin && vistaActual && !vistaActual.es_default && <button onClick={() => marcarDefault(vistaActual.id)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 whitespace-nowrap">★ Hacer por defecto</button>}
+        {isAdmin && vistaActual && <button onClick={eliminarVista} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-red-100 bg-white text-red-500 hover:bg-red-50">Eliminar</button>}
+        {isAdmin && vistaDirty && <span className="text-[11px] text-amber-600 font-bold">Cambios sin guardar en esta vista</span>}
+        <span className="text-[11px] text-slate-400 ml-auto hidden lg:inline">{isAdmin ? 'La vista ★ se carga al entrar. Guarda modelos, orden, formato y filas visibles.' : 'Las vistas las define el administrador. Tus cambios de selección y orden no se guardan.'}</span>
       </div>
       {/* ================= BLOQUE MODELOS: Cards | Ranking ================= */}
       <section className="bg-white rounded-2xl border border-slate-200 shadow-md mb-5">
@@ -882,7 +883,7 @@ function Comparador({ models, categories, features, values, t, lang, cardFields 
   )
 }
 
-function Modelos({ t }: { t: T }) {
+function Modelos({ t, isAdmin }: { t: T; isAdmin: boolean }) {
   const [models, setModels] = useState<any[]>([])
   const [msg, setMsg] = useState('')
   useEffect(() => { load() }, [])
@@ -912,10 +913,10 @@ function Modelos({ t }: { t: T }) {
       {msg && <div className="fixed top-4 right-4 bg-[#081224] text-white px-5 py-3 rounded-full text-sm font-bold shadow-lg z-50">{msg}</div>}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div><h1 className="text-2xl font-black tracking-tight">{t.modelosTitle}</h1><p className="text-slate-500 text-sm">{t.modelosSubtitle} · {models.length} · {grupos.length} marcas</p></div>
-        <div className="flex gap-2">
+        {isAdmin && <div className="flex gap-2">
           <a href="/admin/importar" className="px-4 py-2 border border-slate-300 bg-white text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50">{t.importarExcel}</a>
           <a href="/admin/nuevo-vehiculo" className="px-4 py-2 bg-[#081224] text-white text-sm font-bold rounded-lg hover:bg-[#162040]">{t.nuevoVehiculo}</a>
-        </div>
+        </div>}
       </div>
       <div className="space-y-5">
         {grupos.map(([marca, lista]) => (
@@ -944,8 +945,8 @@ function Modelos({ t }: { t: T }) {
                     <div className="flex items-center gap-2 shrink-0">
                       <span className={`text-xs font-bold px-2 py-1 rounded-full ${m.is_active ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{m.is_active ? t.visible : t.oculto}</span>
                       <span className="hidden md:inline text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition">Ver ficha →</span>
-                      <a href={`/admin/nuevo-vehiculo?id=${m.id}`} onClick={e => e.stopPropagation()} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100 bg-white">{t.editar}</a>
-                      <button onClick={e => { e.preventDefault(); e.stopPropagation(); deleteModel(m.id) }} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50 bg-white">{t.eliminar}</button>
+                      {isAdmin && <a href={`/admin/nuevo-vehiculo?id=${m.id}`} onClick={e => e.stopPropagation()} className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100 bg-white">{t.editar}</a>}
+                      {isAdmin && <button onClick={e => { e.preventDefault(); e.stopPropagation(); deleteModel(m.id) }} className="px-3 py-1 text-xs border border-red-100 text-red-500 rounded-lg hover:bg-red-50 bg-white">{t.eliminar}</button>}
                     </div>
                   </a>
                 )
@@ -1458,7 +1459,8 @@ function Configuracion({ features }: { features: any[] }) {
   )
 }
 
-export default function ComparadorClient({ models, categories: rawCategories, features: rawFeatures, values }: any) {
+export default function ComparadorClient({ models, categories: rawCategories, features: rawFeatures, values, role }: any) {
+  const isAdmin = role !== 'viewer'   // sesiones antiguas sin rol se tratan como admin
   // Red de seguridad: todos los módulos reciben categorías y características
   // ordenadas por sort_order, sea cual sea el orden en que lleguen del servidor.
   const categories = useMemo(() => [...(rawCategories || [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)), [rawCategories])
@@ -1491,7 +1493,7 @@ export default function ComparadorClient({ models, categories: rawCategories, fe
 
   return (
     <div className="flex min-h-screen bg-[#f3f6fa]">
-      <Sidebar active={active} setActive={setActive} collapsed={collapsed} setCollapsed={setCollapsed}
+      <Sidebar active={active} setActive={setActive} collapsed={collapsed} setCollapsed={setCollapsed} isAdmin={isAdmin}
         mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} lang={lang} setLang={setLang} t={t} />
       <div className={`flex-1 ${ml} min-h-screen flex flex-col transition-all duration-200`}>
         <div className="md:hidden flex items-center justify-between bg-[#071225] text-white px-4 h-14 sticky top-0 z-10">
@@ -1500,12 +1502,12 @@ export default function ComparadorClient({ models, categories: rawCategories, fe
           <div className="w-8" />
         </div>
         <main className="flex-1 p-4 md:p-8">
-          {active === 'comparador' && <Comparador models={models} categories={categories} features={features} values={values} t={t} lang={lang} cardFields={cardFields} />}
-          {active === 'modelos' && <Modelos t={t} />}
-          {active === 'categorias' && <Categorias t={t} />}
+          {active === 'comparador' && <Comparador models={models} categories={categories} features={features} values={values} t={t} lang={lang} cardFields={cardFields} isAdmin={isAdmin} />}
+          {active === 'modelos' && <Modelos t={t} isAdmin={isAdmin} />}
+          {active === 'categorias' && isAdmin && <Categorias t={t} />}
           {active === 'analisis' && <Analisis models={models} categories={categories} features={features} values={values} t={t} lang={lang} />}
-          {active === 'valor' && <ValorCliente models={models} categories={categories} features={features} values={values} lang={lang} />}
-          {active === 'config' && <Configuracion features={features} />}
+          {active === 'valor' && <ValorCliente models={models} categories={categories} features={features} values={values} lang={lang} readOnly={!isAdmin} />}
+          {active === 'config' && isAdmin && <Configuracion features={features} />}
         </main>
       </div>
     </div>

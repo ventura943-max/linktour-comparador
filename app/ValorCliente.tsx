@@ -44,8 +44,8 @@ const parseNum = (v: string) => parseFloat(String(v).replace(',', '.').trim())
 // Recalcula EN TIEMPO REAL: cada tecla propaga el valor (onCommit). Se mantiene un
 // texto local para que se pueda escribir "-" o "12." sin que el campo se reinicie.
 // Si el valor cambia desde fuera (cargar otro ejercicio), el texto se sincroniza.
-function NumInput({ value, onCommit, className, step = 50, placeholder = '0' }:
-  { value: number; onCommit: (n: number) => void; className?: string; step?: number; placeholder?: string }) {
+function NumInput({ value, onCommit, className, step = 50, placeholder = '0', disabled = false }:
+  { value: number; onCommit: (n: number) => void; className?: string; step?: number; placeholder?: string; disabled?: boolean }) {
   const [txt, setTxt] = useState(value === 0 ? '' : String(value))
   useEffect(() => {
     const n = parseFloat(txt); const cur = isNaN(n) ? 0 : n
@@ -55,6 +55,7 @@ function NumInput({ value, onCommit, className, step = 50, placeholder = '0' }:
     <input
       type="number"
       step={step}
+      disabled={disabled}
       value={txt}
       placeholder={placeholder}
       onChange={e => { setTxt(e.target.value); const n = parseFloat(e.target.value); onCommit(isNaN(n) ? 0 : n) }}
@@ -67,7 +68,8 @@ function NumInput({ value, onCommit, className, step = 50, placeholder = '0' }:
 }
 
 // ============ COMPONENTE ============
-export default function ValorCliente({ models, categories, features, values, lang }: any) {
+export default function ValorCliente({ models, categories, features, values, lang, readOnly = false }: any) {
+  const ro = !!readOnly   // perfil Consulta: leer y exportar, nunca modificar
   const [ejercicios, setEjercicios] = useState<any[]>([])
   const [ej, setEj] = useState<Ejercicio>(EJERCICIO_VACIO)
   const [dirty, setDirty] = useState(false)
@@ -126,7 +128,7 @@ export default function ValorCliente({ models, categories, features, values, lan
     setDirty(false)
   }
   function toast(t: string) { setMsg(t); setTimeout(() => setMsg(''), 3000) }
-  function upd(patch: Partial<Ejercicio>) { setEj(prev => ({ ...prev, ...patch })); setDirty(true) }
+  function upd(patch: Partial<Ejercicio>) { if (ro) return; setEj(prev => ({ ...prev, ...patch })); setDirty(true) }
 
   // ---------- Cálculos ----------
   const msrpOf = (m: any): number => ej.precios[m.id] !== undefined ? ej.precios[m.id] : parsePrice(m.price)
@@ -238,7 +240,7 @@ export default function ValorCliente({ models, categories, features, values, lan
   // Guardado automático: 1,2 s después del último cambio, solo si el ejercicio ya existe
   // (tiene id y nombre). El primer guardado de un ejercicio nuevo se hace con el botón.
   useEffect(() => {
-    if (!dirty || !ej.id || !ej.nombre.trim() || saving) return
+    if (ro || !dirty || !ej.id || !ej.nombre.trim() || saving) return
     const t = setTimeout(() => { guardar(true) }, 1200)
     return () => clearTimeout(t)
   }, [ej, dirty])
@@ -345,19 +347,20 @@ export default function ValorCliente({ models, categories, features, values, lan
           <p className="text-slate-500 text-sm">Cuánto costaría cada competidor si tuviera el equipamiento del vehículo de referencia</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="text-right leading-tight hidden md:block">
+          {ro && <span className="text-xs font-bold text-slate-500 bg-slate-100 rounded-full px-3 py-1.5">Solo lectura</span>}
+          {!ro && <div className="text-right leading-tight hidden md:block">
             {saving ? <div className="text-xs font-bold text-slate-500">Guardando…</div>
               : !ej.id ? <div className="text-xs font-bold text-amber-600">Ejercicio sin guardar</div>
               : dirty ? <div className="text-xs font-bold text-amber-600">Cambios pendientes · se guardarán solos</div>
               : lastSaved ? <div className="text-xs font-bold text-emerald-600">Guardado ✓ {lastSaved.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</div>
               : <div className="text-xs font-bold text-emerald-600">Guardado ✓</div>}
             {ej.id && <div className="text-[10px] text-slate-400">Guardado automático activado</div>}
-          </div>
-          <button onClick={() => guardar(false)} disabled={saving}
+          </div>}
+          {!ro && <button onClick={() => guardar(false)} disabled={saving}
             className={`flex items-center gap-2 px-5 py-2.5 text-white text-sm font-black rounded-xl transition shadow-md disabled:opacity-50 ${dirty || !ej.id ? 'bg-[#081224] hover:bg-[#162040] ring-2 ring-amber-300' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
             {saving ? 'Guardando…' : 'Guardar ejercicio'}
-          </button>
+          </button>}
           <button onClick={exportExcel} disabled={!listo} className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-full transition disabled:opacity-40">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>Excel
           </button>
@@ -388,14 +391,14 @@ export default function ValorCliente({ models, categories, features, values, lan
           </div>
           <div className="lg:col-span-3">
             <label className="block text-xs font-bold text-slate-500 mb-1">Nombre</label>
-            <input className={`${ic} w-full`} value={ej.nombre} onChange={e => upd({ nombre: e.target.value })} placeholder="ej. BIG v1.0 vs segmento L7e" />
+            <input className={`${ic} w-full`} value={ej.nombre} disabled={ro} onChange={e => upd({ nombre: e.target.value })} placeholder="ej. BIG v1.0 vs segmento L7e" />
           </div>
           <div className="lg:col-span-2">
             <label className="block text-xs font-bold text-slate-500 mb-1">Tipo de comparativa</label>
-            <input className={`${ic} w-full`} list="vc-tipos" value={ej.tipo} onChange={e => upd({ tipo: e.target.value })} placeholder="ej. Comité, Comercial…" />
+            <input className={`${ic} w-full`} list="vc-tipos" value={ej.tipo} disabled={ro} onChange={e => upd({ tipo: e.target.value })} placeholder="ej. Comité, Comercial…" />
             <datalist id="vc-tipos">{tipos.map(t => <option key={t} value={t} />)}</datalist>
           </div>
-          <div className="lg:col-span-3 flex gap-2 justify-end flex-wrap">
+          {!ro && <div className="lg:col-span-3 flex gap-2 justify-end flex-wrap">
             <button onClick={nuevo} className={btnGhost}>Nuevo</button>
             <button onClick={duplicar} disabled={!ej.reference_model_id} className={`${btnGhost} disabled:opacity-40`}>Duplicar</button>
             {ej.id && <button onClick={eliminar} className={`${btn} border-red-100 bg-white text-red-500 hover:bg-red-50`}>Eliminar</button>}
@@ -403,7 +406,7 @@ export default function ValorCliente({ models, categories, features, values, lan
               {saving ? 'Guardando…' : 'Guardar'}
               {dirty && !saving && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 border-2 border-white" title="Cambios sin guardar" />}
             </button>
-          </div>
+          </div>}
         </div>
         {!ej.id && ej.reference_model_id && <p className="text-[11px] text-amber-600 mt-2">Ponle nombre y pulsa «Guardar ejercicio»: a partir de ahí los cambios se guardan automáticamente.</p>}
       </div>
@@ -421,7 +424,7 @@ export default function ValorCliente({ models, categories, features, values, lan
           {/* Referencia */}
           <div className="lg:col-span-1">
             <label className="block text-xs font-bold text-blue-700 mb-1">Vehículo de referencia</label>
-            <select value={ej.reference_model_id} onChange={e => setReferencia(e.target.value)}
+            <select value={ej.reference_model_id} disabled={ro} onChange={e => setReferencia(e.target.value)}
               className="w-full border-2 border-blue-200 bg-blue-50 rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-blue-400">
               <option value="">Selecciona…</option>
               {modelsInSegment.map((m: any) => <option key={m.id} value={m.id}>{m.brand} {m.name} {m.version}</option>)}
@@ -446,7 +449,7 @@ export default function ValorCliente({ models, categories, features, values, lan
               <label className="block text-xs font-bold text-slate-600">Competidores <span className="text-slate-400 font-normal">({compModels.length})</span></label>
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-slate-400">€/km autonomía</span>
-                <NumInput value={ej.precio_km} step={1} onCommit={n => upd({ precio_km: n })} className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center outline-none focus:border-blue-400" />
+                <NumInput value={ej.precio_km} step={1} disabled={ro} onCommit={n => upd({ precio_km: n })} className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center outline-none focus:border-blue-400" />
               </div>
             </div>
             <div className="flex flex-wrap gap-2 min-h-[44px]">
@@ -459,14 +462,14 @@ export default function ValorCliente({ models, categories, features, values, lan
                     <div className="text-[9px] font-black text-slate-500 uppercase">{c.brand}</div>
                     <div className="text-xs font-bold text-slate-800">{c.name} {c.version}</div>
                   </div>
-                  <div className="flex flex-col ml-1">
+                  {!ro && <div className="flex flex-col ml-1">
                     <button onClick={() => moveCompetidor(idx, -1)} disabled={idx === 0} className="text-slate-300 hover:text-slate-700 disabled:opacity-20 text-[9px] leading-none px-1">◀</button>
                     <button onClick={() => moveCompetidor(idx, 1)} disabled={idx === compModels.length - 1} className="text-slate-300 hover:text-slate-700 disabled:opacity-20 text-[9px] leading-none px-1">▶</button>
-                  </div>
-                  <button onClick={() => removeCompetidor(c.id)} className="w-5 h-5 rounded-full text-slate-400 hover:bg-red-100 hover:text-red-500 text-xs font-bold flex items-center justify-center">✕</button>
+                  </div>}
+                  {!ro && <button onClick={() => removeCompetidor(c.id)} className="w-5 h-5 rounded-full text-slate-400 hover:bg-red-100 hover:text-red-500 text-xs font-bold flex items-center justify-center">✕</button>}
                 </div>
               ))}
-              <div className="relative">
+              {!ro && <div className="relative">
                 <button onClick={() => setAddCompOpen(v => !v)} disabled={!refModel || disponibles.length === 0}
                   className="h-full min-h-[44px] px-4 border-2 border-dashed border-slate-300 rounded-xl text-xs font-bold text-slate-400 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition disabled:opacity-40">
                   + Añadir competidor
@@ -481,9 +484,9 @@ export default function ValorCliente({ models, categories, features, values, lan
                     ))}
                   </div>
                 )}
-              </div>
+              </div>}
             </div>
-            {!refModel && <p className="text-[11px] text-slate-400 mt-2">Elige primero el vehículo de referencia.</p>}
+            {!refModel && !ro && <p className="text-[11px] text-slate-400 mt-2">Elige primero el vehículo de referencia.</p>}
           </div>
         </div>
       </div>
@@ -526,11 +529,11 @@ export default function ValorCliente({ models, categories, features, values, lan
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-slate-400 hidden xl:inline">Ajuste <span className="text-emerald-600 font-bold">+</span> la referencia tiene algo que el competidor no · <span className="text-red-600 font-bold">−</span> el competidor tiene algo que la referencia no</span>
-              <button onClick={() => resetAjustes()} disabled={nAjustesManuales === 0} title="Poner a 0 todos los ajustes manuales de este ejercicio"
+              {!ro && <button onClick={() => resetAjustes()} disabled={nAjustesManuales === 0} title="Poner a 0 todos los ajustes manuales de este ejercicio"
                 className={`${btn} border-red-100 bg-white text-red-500 hover:bg-red-50 disabled:opacity-40`}>
                 ↺ Resetear ajustes{nAjustesManuales > 0 && <span className="ml-1 text-red-300">({nAjustesManuales})</span>}
-              </button>
-              <button onClick={() => setShowRows(true)} className={btnGhost}>Filas visibles</button>
+              </button>}
+              {!ro && <button onClick={() => setShowRows(true)} className={btnGhost}>Filas visibles</button>}
             </div>
           </div>
 
@@ -570,12 +573,12 @@ export default function ValorCliente({ models, categories, features, values, lan
                   <td className="border border-slate-100 px-2 py-2 text-[9px] font-bold text-slate-500">Precio</td>
                   <td className="border border-slate-100 px-2 py-2 text-[10px] font-bold text-slate-700">MSRP (€)</td>
                   <td className={`border border-slate-100 px-1 py-1 text-center ${refCol}`}>
-                    <NumInput value={msrpOf(refModel)} step={10} onCommit={n => upd({ precios: { ...ej.precios, [refModel.id]: n } })} className="w-24 text-center font-black text-xs rounded-lg px-2 py-1 border border-blue-200 bg-white text-blue-900 outline-none focus:border-blue-400" />
+                    <NumInput value={msrpOf(refModel)} step={10} disabled={ro} onCommit={n => upd({ precios: { ...ej.precios, [refModel.id]: n } })} className="w-24 text-center font-black text-xs rounded-lg px-2 py-1 border border-blue-200 bg-white text-blue-900 outline-none focus:border-blue-400" />
                   </td>
                   {compModels.map((c: any, gi: number) => (
                     <Fragment key={c.id}>
                       <td key={c.id + 'v'} className={`border border-slate-100 px-1 py-1 text-center ${edge} ${grp(gi)}`}>
-                        <NumInput value={msrpOf(c)} step={10} onCommit={n => upd({ precios: { ...ej.precios, [c.id]: n } })} className="w-24 text-center font-black text-xs rounded-lg px-2 py-1 border border-slate-200 bg-white text-slate-800 outline-none focus:border-blue-400" />
+                        <NumInput value={msrpOf(c)} step={10} disabled={ro} onCommit={n => upd({ precios: { ...ej.precios, [c.id]: n } })} className="w-24 text-center font-black text-xs rounded-lg px-2 py-1 border border-slate-200 bg-white text-slate-800 outline-none focus:border-blue-400" />
                       </td>
                       <td key={c.id + 'a'} className={`border border-slate-100 ${grp(gi)}`}></td>
                     </Fragment>
@@ -616,7 +619,7 @@ export default function ValorCliente({ models, categories, features, values, lan
                               {isAut ? (
                                 <span className={`inline-block w-24 text-right font-bold text-xs rounded-lg px-2 py-1 border ${ajCls(a)}`} title={`(${parseNum(refV) || 0} − ${parseNum(v) || 0}) × ${ej.precio_km}`}>{a !== 0 ? fmtEur(a, true) : '—'}</span>
                               ) : (
-                                <NumInput value={a} onCommit={n => setAjuste(c.id, f.id, n)} className={`w-24 text-right font-bold text-xs rounded-lg px-2 py-1 border outline-none focus:border-blue-400 ${ajCls(a)}`} />
+                                <NumInput value={a} disabled={ro} onCommit={n => setAjuste(c.id, f.id, n)} className={`w-24 text-right font-bold text-xs rounded-lg px-2 py-1 border outline-none focus:border-blue-400 ${ajCls(a)}`} />
                               )}
                             </td>
                           </Fragment>
@@ -676,7 +679,7 @@ export default function ValorCliente({ models, categories, features, values, lan
       {listo && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-4">
           <label className="block text-xs font-bold text-slate-500 mb-1">Notas del ejercicio</label>
-          <textarea rows={2} value={ej.notas} onChange={e => upd({ notas: e.target.value })} placeholder="Hipótesis, fuentes de precios estimados, comentarios para el comité…"
+          <textarea rows={2} value={ej.notas} disabled={ro} onChange={e => upd({ notas: e.target.value })} placeholder="Hipótesis, fuentes de precios estimados, comentarios para el comité…"
             className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-400 resize-none" />
         </div>
       )}
